@@ -39,6 +39,8 @@ class SttResult {
 class RealSttDatasource implements SttDatasource {
   final _speech = SpeechToText();
   StreamController<SttResult>? _controller;
+  bool _stopping = false;
+  String _languageCode = 'es_ES';
 
   @override
   Stream<SttResult> startStreaming({
@@ -46,10 +48,10 @@ class RealSttDatasource implements SttDatasource {
     required String languageCode,
   }) async* {
     _controller = StreamController<SttResult>.broadcast();
+    _stopping = false;
+    _languageCode = _mapLanguage(languageCode);
 
-    final available = await _speech.initialize(
-      onError: (error) => _controller?.addError(error),
-    );
+    final available = await _speech.initialize();
 
     if (!available) {
       _controller?.addError('Reconocimiento de voz no disponible');
@@ -57,30 +59,43 @@ class RealSttDatasource implements SttDatasource {
       return;
     }
 
-    // Iniciar escucha SIN await — el callback onResult alimenta el stream
-    unawaited(_speech.listen(
+    // Primera escucha
+    _startListening();
+
+    yield* _controller!.stream;
+  }
+
+  void _startListening() {
+    _speech.listen(
       onResult: (SpeechRecognitionResult result) {
         if (result.recognizedWords.isEmpty) return;
-
         _controller?.add(SttResult(
           transcript: result.recognizedWords,
           isFinal: result.finalResult,
           confidence: 1.0,
         ));
       },
-      localeId: _mapLanguage(languageCode),
+      localeId: _languageCode,
       listenOptions: SpeechListenOptions(
         listenMode: ListenMode.confirmation,
         partialResults: true,
-        cancelOnError: false,
       ),
-    ));
-
-    yield* _controller!.stream;
+    ).then((_) {
+      // Sesión terminó naturalmente — reiniciar con delay mínimo
+      if (!_stopping) {
+        Future.delayed(const Duration(milliseconds: 300), _startListening);
+      }
+    }).catchError((_) {
+      // Error en la sesión — reintentar
+      if (!_stopping) {
+        Future.delayed(const Duration(milliseconds: 500), _startListening);
+      }
+    });
   }
 
   @override
   Future<void> stop() async {
+    _stopping = true;
     await _speech.stop();
     await _controller?.close();
     _controller = null;

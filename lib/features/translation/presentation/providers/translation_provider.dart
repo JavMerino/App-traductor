@@ -138,21 +138,27 @@ class TranslationNotifier extends StateNotifier<TranslationState> {
       playingParagraphId: paragraphId,
     );
 
-    try {
-      await RealTtsDatasource.instance.synthesize(
-        text: paragraph.translatedText,
-        voiceName: '',
-        languageCode: 'en', // el TTS usa su propio languageCode
+    // Fire & forget — no bloquea el pipeline
+    unawaited(RealTtsDatasource.instance.synthesize(
+      text: paragraph.translatedText,
+      voiceName: '',
+      languageCode: 'en',
+    ).then((_) {
+      // Volver al estado anterior cuando termina de hablar
+      state = state.copyWith(
+        status: state.isStreaming
+            ? TranslationStatus.listening
+            : TranslationStatus.idle,
+        playingParagraphId: null,
       );
-    } catch (_) {}
-
-    // Volver al estado anterior después de reproducir
-    state = state.copyWith(
-      status: state.isStreaming
-          ? TranslationStatus.listening
-          : TranslationStatus.idle,
-      playingParagraphId: null,
-    );
+    }).catchError((_) {
+      state = state.copyWith(
+        status: state.isStreaming
+            ? TranslationStatus.listening
+            : TranslationStatus.idle,
+        playingParagraphId: null,
+      );
+    }));
   }
 
   /// Detiene la escucha y guarda la sesión.
