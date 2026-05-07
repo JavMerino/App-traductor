@@ -90,6 +90,34 @@ class ExportRepositoryImpl implements ExportRepository {
   }
 
   pw.Widget _buildSessionSection(TranslationSession session) {
+    final items = <pw.Widget>[];
+
+    // Header
+    items.add(pw.Row(
+      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+      children: [
+        pw.Text(
+          '${session.sourceLanguage.toUpperCase()} → ${session.targetLanguage.toUpperCase()}',
+          style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold, color: PdfColors.blue700),
+        ),
+        pw.Text(session.formattedDate, style: pw.TextStyle(fontSize: 10, color: PdfColors.grey)),
+      ],
+    ));
+    items.add(pw.SizedBox(height: 8));
+
+    // Párrafos
+    for (int i = 0; i < session.paragraphs.length; i++) {
+      final p = session.paragraphs[i];
+      items.add(pw.Text('Párrafo ${i + 1}', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold, color: PdfColors.grey)));
+      items.add(pw.SizedBox(height: 4));
+      items.add(pw.Text(p.originalText, style: const pw.TextStyle(fontSize: 11)));
+      items.add(pw.SizedBox(height: 4));
+      items.add(pw.Text(p.translatedText, style: pw.TextStyle(fontSize: 11, color: PdfColors.blue900)));
+      items.add(pw.SizedBox(height: 10));
+    }
+
+    items.add(pw.Divider());
+
     return pw.Container(
       margin: const pw.EdgeInsets.only(bottom: 16),
       padding: const pw.EdgeInsets.all(12),
@@ -97,73 +125,7 @@ class ExportRepositoryImpl implements ExportRepository {
         border: pw.Border.all(color: PdfColors.grey300),
         borderRadius: const pw.BorderRadius.all(pw.Radius.circular(8)),
       ),
-      child: pw.Column(
-        crossAxisAlignment: pw.CrossAxisAlignment.start,
-        children: [
-          // Header
-          pw.Row(
-            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-            children: [
-              pw.Text(
-                '${session.sourceLanguage.toUpperCase()} → ${session.targetLanguage.toUpperCase()}',
-                style: pw.TextStyle(
-                  fontSize: 12,
-                  fontWeight: pw.FontWeight.bold,
-                  color: PdfColors.blue700,
-                ),
-              ),
-              pw.Text(
-                session.formattedDate,
-                style: pw.TextStyle(fontSize: 10, color: PdfColors.grey),
-              ),
-            ],
-          ),
-          pw.SizedBox(height: 8),
-
-          // Original
-          pw.Text(
-            'ORIGINAL:',
-            style: pw.TextStyle(
-              fontSize: 9,
-              fontWeight: pw.FontWeight.bold,
-              color: PdfColors.grey,
-            ),
-          ),
-          pw.SizedBox(height: 2),
-          pw.Text(
-            session.originalText,
-            style: const pw.TextStyle(fontSize: 11),
-          ),
-          pw.SizedBox(height: 8),
-
-          // Traducción
-          pw.Text(
-            'TRADUCCIÓN:',
-            style: pw.TextStyle(
-              fontSize: 9,
-              fontWeight: pw.FontWeight.bold,
-              color: PdfColors.blue700,
-            ),
-          ),
-          pw.SizedBox(height: 2),
-          pw.Text(
-            session.translatedText,
-            style: pw.TextStyle(
-              fontSize: 11,
-              color: PdfColors.blue900,
-            ),
-          ),
-          pw.SizedBox(height: 4),
-
-          // Duración
-          pw.Text(
-            'Duración: ${session.formattedDuration}',
-            style: pw.TextStyle(fontSize: 9, color: PdfColors.grey),
-          ),
-
-          pw.Divider(),
-        ],
-      ),
+      child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: items),
     );
   }
 

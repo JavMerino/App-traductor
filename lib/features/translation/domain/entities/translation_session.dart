@@ -1,57 +1,41 @@
+import 'package:audio_traductor/features/translation/domain/entities/translation_paragraph.dart';
 import 'package:equatable/equatable.dart';
 import 'package:intl/intl.dart';
 
-/// Una sesión completa de traducción.
-///
-/// Contiene el texto original, la traducción y metadatos.
-/// Se persiste en el historial.
 class TranslationSession extends Equatable {
   final String id;
+  final String name;
   final String sourceLanguage;
   final String targetLanguage;
-  final String originalText;
-  final String translatedText;
-  final String? audioSourcePath;
-  final String? audioOutputPath;
+  final List<TranslationParagraph> paragraphs;
   final DateTime createdAt;
   final int durationMs;
 
   const TranslationSession({
     required this.id,
+    this.name = '',
     required this.sourceLanguage,
     required this.targetLanguage,
-    required this.originalText,
-    required this.translatedText,
-    this.audioSourcePath,
-    this.audioOutputPath,
+    this.paragraphs = const [],
     required this.createdAt,
-    required this.durationMs,
+    this.durationMs = 0,
   });
 
   @override
-  List<Object?> get props => [
-        id,
-        sourceLanguage,
-        targetLanguage,
-        originalText,
-        translatedText,
-        audioSourcePath,
-        audioOutputPath,
-        createdAt,
-        durationMs,
-      ];
+  List<Object?> get props => [id, name, sourceLanguage, targetLanguage, paragraphs, createdAt, durationMs];
 
-  /// Fecha formateada para mostrar en UI.
-  String get formattedDate {
-    final formatter = DateFormat('dd/MM/yyyy HH:mm');
-    return formatter.format(createdAt);
-  }
+  String get formattedDate => DateFormat('dd/MM/yyyy HH:mm').format(createdAt);
 
-  /// Duración formateada.
   String get formattedDuration {
-    final seconds = (durationMs / 1000).floor();
-    final min = (seconds / 60).floor();
-    final sec = seconds % 60;
-    return '${min}m ${sec}s';
+    final s = (durationMs / 1000).floor();
+    return '${(s / 60).floor()}m ${s % 60}s';
   }
+
+  int get paragraphCount => paragraphs.length;
+
+  /// Todo el texto original concatenado.
+  String get fullOriginal => paragraphs.map((p) => p.originalText).join(' ');
+
+  /// Toda la traducción concatenada.
+  String get fullTranslated => paragraphs.map((p) => p.translatedText).join(' ');
 }

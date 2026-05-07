@@ -1,86 +1,82 @@
+import 'package:audio_traductor/features/translation/domain/entities/translation_paragraph.dart';
 import 'package:audio_traductor/features/translation/domain/entities/translation_session.dart';
 
-/// Modelo de [TranslationSession] para serialización/deserialización.
-///
-/// Sigue el patrón: Entity → Model ↔ JSON/Hive.
 class TranslationSessionModel {
   final String id;
+  final String name;
   final String sourceLanguage;
   final String targetLanguage;
-  final String originalText;
-  final String translatedText;
-  final String? audioSourcePath;
-  final String? audioOutputPath;
+  final List<Map<String, dynamic>> paragraphsJson;
   final DateTime createdAt;
   final int durationMs;
 
   const TranslationSessionModel({
     required this.id,
+    this.name = '',
     required this.sourceLanguage,
     required this.targetLanguage,
-    required this.originalText,
-    required this.translatedText,
-    this.audioSourcePath,
-    this.audioOutputPath,
+    required this.paragraphsJson,
     required this.createdAt,
     required this.durationMs,
   });
 
-  /// Crea un modelo desde un mapa JSON.
   factory TranslationSessionModel.fromJson(Map<String, dynamic> json) {
     return TranslationSessionModel(
       id: json['id'] as String,
+      name: json['name'] as String? ?? '',
       sourceLanguage: json['sourceLanguage'] as String,
       targetLanguage: json['targetLanguage'] as String,
-      originalText: json['originalText'] as String,
-      translatedText: json['translatedText'] as String,
-      audioSourcePath: json['audioSourcePath'] as String?,
-      audioOutputPath: json['audioOutputPath'] as String?,
+      paragraphsJson: (json['paragraphs'] as List?)?.cast<Map<String, dynamic>>() ?? [],
       createdAt: DateTime.parse(json['createdAt'] as String),
-      durationMs: json['durationMs'] as int,
+      durationMs: json['durationMs'] as int? ?? 0,
     );
   }
 
-  /// Convierte a mapa JSON.
   Map<String, dynamic> toJson() {
     return {
       'id': id,
+      'name': name,
       'sourceLanguage': sourceLanguage,
       'targetLanguage': targetLanguage,
-      'originalText': originalText,
-      'translatedText': translatedText,
-      'audioSourcePath': audioSourcePath,
-      'audioOutputPath': audioOutputPath,
+      'paragraphs': paragraphsJson,
       'createdAt': createdAt.toIso8601String(),
       'durationMs': durationMs,
     };
   }
 
-  /// Convierte a entidad del dominio.
   TranslationSession toEntity() {
     return TranslationSession(
       id: id,
+      name: name,
       sourceLanguage: sourceLanguage,
       targetLanguage: targetLanguage,
-      originalText: originalText,
-      translatedText: translatedText,
-      audioSourcePath: audioSourcePath,
-      audioOutputPath: audioOutputPath,
+      paragraphs: paragraphsJson.map((p) => TranslationParagraph(
+        id: p['id'] as String? ?? '',
+        originalText: p['originalText'] as String,
+        translatedText: p['translatedText'] as String,
+        sourceLanguage: p['sourceLanguage'] as String? ?? '',
+        targetLanguage: p['targetLanguage'] as String? ?? '',
+        timestamp: DateTime.parse(p['timestamp'] as String),
+      )).toList(),
       createdAt: createdAt,
       durationMs: durationMs,
     );
   }
 
-  /// Crea un modelo desde una entidad.
   factory TranslationSessionModel.fromEntity(TranslationSession entity) {
     return TranslationSessionModel(
       id: entity.id,
+      name: entity.name,
       sourceLanguage: entity.sourceLanguage,
       targetLanguage: entity.targetLanguage,
-      originalText: entity.originalText,
-      translatedText: entity.translatedText,
-      audioSourcePath: entity.audioSourcePath,
-      audioOutputPath: entity.audioOutputPath,
+      paragraphsJson: entity.paragraphs.map((p) => {
+        'id': p.id,
+        'originalText': p.originalText,
+        'translatedText': p.translatedText,
+        'sourceLanguage': p.sourceLanguage,
+        'targetLanguage': p.targetLanguage,
+        'timestamp': p.timestamp.toIso8601String(),
+      }).toList(),
       createdAt: entity.createdAt,
       durationMs: entity.durationMs,
     );

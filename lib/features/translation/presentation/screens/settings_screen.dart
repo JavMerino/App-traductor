@@ -1,6 +1,6 @@
 import 'package:audio_traductor/features/translation/presentation/providers/audio_settings_provider.dart';
 import 'package:audio_traductor/features/translation/presentation/providers/theme_provider.dart';
-import 'package:audio_traductor/features/translation/presentation/widgets/bluetooth_panel.dart';
+import 'package:audio_traductor/features/translation/presentation/widgets/audio_devices_panel.dart';
 import 'package:audio_traductor/features/translation/presentation/widgets/color_selector.dart';
 import 'package:audio_traductor/features/translation/presentation/widgets/voice_selector.dart';
 import 'package:flutter/material.dart';
@@ -159,8 +159,8 @@ class SettingsScreen extends ConsumerWidget {
 
           const SizedBox(height: 16),
 
-          // ── Bluetooth ──
-          _SectionHeader(title: 'Bluetooth'),
+          // ── Dispositivos de audio ──
+          _SectionHeader(title: 'Dispositivos de audio'),
           Card(
             margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
             child: Padding(
@@ -170,13 +170,13 @@ class SettingsScreen extends ConsumerWidget {
                 children: [
                   Row(
                     children: [
-                      Icon(Icons.bluetooth, size: 18, color: colorScheme.primary),
+                      Icon(Icons.speaker_group, size: 18, color: colorScheme.primary),
                       const SizedBox(width: 8),
-                      Text('Salida de audio', style: theme.textTheme.titleSmall),
+                      Text('Entrada y salida', style: theme.textTheme.titleSmall),
                     ],
                   ),
                   const SizedBox(height: 12),
-                  const BluetoothPanel(),
+                  const AudioDevicesPanel(),
                 ],
               ),
             ),

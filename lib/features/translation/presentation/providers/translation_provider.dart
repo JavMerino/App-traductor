@@ -1,32 +1,20 @@
 import 'dart:async';
 import 'package:audio_traductor/core/di/injection_container.dart';
 import 'package:audio_traductor/features/translation/data/datasources/google_tts_datasource.dart';
+import 'package:audio_traductor/features/translation/domain/entities/translation_paragraph.dart';
 import 'package:audio_traductor/features/translation/domain/entities/translation_session.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-/// Estado de la traducción en la UI.
 enum TranslationStatus { idle, listening, translating, playing, error }
 
-/// Un párrafo individual: lo que dijiste + su traducción.
-class TranslationParagraph {
-  final String id;
-  final String originalText;
-  final String translatedText;
-
-  const TranslationParagraph({
-    required this.id,
-    required this.originalText,
-    required this.translatedText,
-  });
-}
-
-/// Estado completo de la pantalla de traducción.
 class TranslationState {
   final TranslationStatus status;
   final List<TranslationParagraph> paragraphs;
   final String? errorMessage;
   final bool isStreaming;
   final String? playingParagraphId;
+  final String? currentSessionId;
+  final String sessionName;
 
   const TranslationState({
     this.status = TranslationStatus.idle,
@@ -34,6 +22,8 @@ class TranslationState {
     this.errorMessage,
     this.isStreaming = false,
     this.playingParagraphId,
+    this.currentSessionId,
+    this.sessionName = '',
   });
 
   TranslationState copyWith({
@@ -42,6 +32,8 @@ class TranslationState {
     String? errorMessage,
     bool? isStreaming,
     String? playingParagraphId,
+    String? currentSessionId,
+    String? sessionName,
   }) {
     return TranslationState(
       status: status ?? this.status,
@@ -49,16 +41,17 @@ class TranslationState {
       errorMessage: errorMessage,
       isStreaming: isStreaming ?? this.isStreaming,
       playingParagraphId: playingParagraphId,
+      currentSessionId: currentSessionId,
+      sessionName: sessionName ?? this.sessionName,
     );
   }
 }
 
-/// Provider principal de la traducción.
 class TranslationNotifier extends StateNotifier<TranslationState> {
   TranslationNotifier() : super(const TranslationState());
 
   StreamSubscription? _subscription;
-  int _paragraphCounter = 0;
+  int _counter = 0;
 
   @override
   void dispose() {
@@ -66,16 +59,16 @@ class TranslationNotifier extends StateNotifier<TranslationState> {
     super.dispose();
   }
 
-  /// Inicia la escucha.
   Future<void> startTranslation({
     required String sourceLanguage,
     required String targetLanguage,
     required String voiceName,
+    String? existingSessionId,
+    String? sessionName,
   }) async {
     if (state.isStreaming) return;
 
-    _paragraphCounter = 0;
-
+    _counter = 0;
     state = state.copyWith(
       status: TranslationStatus.listening,
       isStreaming: true,
@@ -88,33 +81,36 @@ class TranslationNotifier extends StateNotifier<TranslationState> {
         sourceLanguage: sourceLanguage,
         targetLanguage: targetLanguage,
         voiceName: voiceName,
+        existingSessionId: existingSessionId,
+        sessionName: sessionName,
       );
 
       _subscription = stream.listen(
         (chunk) {
           if (!chunk.isFinal) {
-            // Resultado parcial — mostramos que está traduciendo
             state = state.copyWith(status: TranslationStatus.translating);
             return;
           }
-
-          // Resultado final (pausa detectada) → agregar párrafo
-          _paragraphCounter++;
-          final paragraph = TranslationParagraph(
-            id: 'p$_paragraphCounter',
-            originalText: chunk.originalText,
-            translatedText: chunk.translatedText,
-          );
-
+          _counter++;
           state = state.copyWith(
             status: TranslationStatus.listening,
-            paragraphs: [...state.paragraphs, paragraph],
+            paragraphs: [
+              ...state.paragraphs,
+              TranslationParagraph(
+                id: 'p$_counter',
+                originalText: chunk.originalText,
+                translatedText: chunk.translatedText,
+                sourceLanguage: sourceLanguage,
+                targetLanguage: targetLanguage,
+                timestamp: DateTime.now(),
+              ),
+            ],
           );
         },
         onError: (error) {
           state = state.copyWith(
             status: TranslationStatus.error,
-            errorMessage: 'Error en la traducción: $error',
+            errorMessage: 'Error: $error',
             isStreaming: false,
           );
         },
@@ -128,81 +124,51 @@ class TranslationNotifier extends StateNotifier<TranslationState> {
     }
   }
 
-  /// Reproduce la traducción de un párrafo específico.
-  Future<void> playParagraph(String paragraphId) async {
-    final paragraph =
-        state.paragraphs.firstWhere((p) => p.id == paragraphId);
-
-    state = state.copyWith(
-      status: TranslationStatus.playing,
-      playingParagraphId: paragraphId,
-    );
-
-    // Fire & forget — no bloquea el pipeline
-    unawaited(RealTtsDatasource.instance.synthesize(
-      text: paragraph.translatedText,
-      voiceName: '',
-      languageCode: 'en',
-    ).then((_) {
-      // Volver al estado anterior cuando termina de hablar
-      state = state.copyWith(
-        status: state.isStreaming
-            ? TranslationStatus.listening
-            : TranslationStatus.idle,
-        playingParagraphId: null,
-      );
-    }).catchError((_) {
-      state = state.copyWith(
-        status: state.isStreaming
-            ? TranslationStatus.listening
-            : TranslationStatus.idle,
-        playingParagraphId: null,
-      );
-    }));
+  void setSessionInfo(String id, String name) {
+    state = state.copyWith(currentSessionId: id, sessionName: name);
   }
 
-  /// Detiene la escucha y guarda la sesión.
+  Future<void> playParagraph(String paragraphId) async {
+    final p = state.paragraphs.firstWhere((p) => p.id == paragraphId);
+    state = state.copyWith(status: TranslationStatus.playing, playingParagraphId: paragraphId);
+
+    unawaited(RealTtsDatasource.instance.synthesize(
+      text: p.translatedText, voiceName: '', languageCode: 'en',
+    ).then((_) => _afterPlay()).catchError((_) => _afterPlay()));
+  }
+
+  void _afterPlay() {
+    state = state.copyWith(
+      status: state.isStreaming ? TranslationStatus.listening : TranslationStatus.idle,
+      playingParagraphId: null,
+    );
+  }
+
   Future<void> stopTranslation() async {
     await _subscription?.cancel();
     _subscription = null;
-
     final result = await InjectionContainer.stopTranslation();
     result.fold(
-      (failure) {
-        state = state.copyWith(
-          status: TranslationStatus.error,
-          errorMessage: failure.message,
-          isStreaming: false,
-        );
-      },
-      (session) {
-        state = state.copyWith(
-          status: TranslationStatus.idle,
-          isStreaming: false,
-        );
-      },
+      (failure) => state = state.copyWith(status: TranslationStatus.error, errorMessage: failure.message, isStreaming: false),
+      (session) => state = state.copyWith(
+        status: TranslationStatus.idle,
+        isStreaming: false,
+        currentSessionId: session.id,
+        sessionName: session.name,
+      ),
     );
   }
 }
 
-final translationProvider =
-    StateNotifierProvider<TranslationNotifier, TranslationState>((ref) {
+final translationProvider = StateNotifierProvider<TranslationNotifier, TranslationState>((ref) {
   return TranslationNotifier();
 });
 
 final historyProvider = FutureProvider<List<TranslationSession>>((ref) async {
   final result = await InjectionContainer.getHistory();
-  return result.fold(
-    (failure) => throw failure,
-    (sessions) => sessions,
-  );
+  return result.fold((failure) => throw failure, (s) => s);
 });
 
-final deleteSessionProvider =
-    FutureProvider.family<void, String>((ref, sessionId) async {
-  final result = await InjectionContainer.deleteSession(sessionId);
-  result.fold(
-    (failure) => throw failure,
-    (_) => null,
-  );
+final deleteSessionProvider = FutureProvider.family<void, String>((ref, id) async {
+  await InjectionContainer.deleteSession(id);
 });

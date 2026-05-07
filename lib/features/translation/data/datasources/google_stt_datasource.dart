@@ -77,7 +77,7 @@ class RealSttDatasource implements SttDatasource {
       },
       localeId: _languageCode,
       listenOptions: SpeechListenOptions(
-        listenMode: ListenMode.confirmation,
+        listenMode: ListenMode.search,
         partialResults: true,
       ),
     ).then((_) {

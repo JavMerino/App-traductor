@@ -5,12 +5,13 @@ import 'package:audio_traductor/features/translation/data/datasources/google_tra
 import 'package:audio_traductor/features/translation/data/datasources/google_tts_datasource.dart';
 import 'package:audio_traductor/features/translation/data/datasources/translation_local_datasource.dart';
 import 'package:audio_traductor/features/translation/data/models/translation_session_model.dart';
+import 'package:audio_traductor/features/translation/domain/entities/translation_paragraph.dart';
 import 'package:audio_traductor/features/translation/domain/entities/translation_session.dart';
 import 'package:audio_traductor/features/translation/domain/repositories/translation_repository.dart';
 import 'package:dartz/dartz.dart';
 import 'package:uuid/uuid.dart';
+import 'package:intl/intl.dart';
 
-/// Pipeline real: STT (speech_to_text) → Translate (Google) → TTS (flutter_tts)
 class TranslationRepositoryImpl implements TranslationRepository {
   final SttDatasource _stt;
   final TranslateDatasource _translate;
@@ -19,11 +20,13 @@ class TranslationRepositoryImpl implements TranslationRepository {
 
   StreamSubscription<SttResult>? _sttSubscription;
   StreamController<TranslationChunk>? _chunkController;
-  final _pendingTexts = <String>[];
+  List<TranslationParagraph> _paragraphs = [];
   final _uuid = const Uuid();
   int _startTimeMs = 0;
   String _sourceLanguage = 'es';
   String _targetLanguage = 'en';
+  String _currentSessionId = '';
+  String _sessionName = '';
 
   TranslationRepositoryImpl({
     required SttDatasource stt,
@@ -40,11 +43,28 @@ class TranslationRepositoryImpl implements TranslationRepository {
     required String sourceLanguage,
     required String targetLanguage,
     required String voiceName,
+    String? existingSessionId,
+    String? sessionName,
   }) async* {
     _startTimeMs = DateTime.now().millisecondsSinceEpoch;
     _chunkController = StreamController<TranslationChunk>.broadcast();
     _sourceLanguage = sourceLanguage;
     _targetLanguage = targetLanguage;
+
+    // Guardar nombre personalizado
+    _sessionName = sessionName ?? 'Sesión ${DateFormat('dd/MM HH:mm').format(DateTime.now())}';
+
+    // Manejar sesión
+    if (existingSessionId != null && existingSessionId != '_new_') {
+      // Continuar sesión existente
+      _currentSessionId = existingSessionId;
+      final existing = await _local.getSession(existingSessionId);
+      _paragraphs = existing?.toEntity().paragraphs ?? [];
+    } else {
+      // Nueva sesión
+      _currentSessionId = _uuid.v4();
+      _paragraphs = [];
+    }
 
     final sttStream = _stt.startStreaming(
       audioStream: const Stream.empty(),
@@ -55,26 +75,31 @@ class TranslationRepositoryImpl implements TranslationRepository {
       (sttResult) async {
         if (sttResult.transcript.isEmpty) return;
 
-        _pendingTexts.add(sttResult.transcript);
-
         try {
-          // 1. Traducir
           final translateResult = await _translate.translate(
             text: sttResult.transcript,
             sourceLanguage: sourceLanguage,
             targetLanguage: targetLanguage,
           );
 
-          // 2. Sintetizar y reproducir voz (solo resultados finales)
           if (sttResult.isFinal) {
             unawaited(_tts.synthesize(
               text: translateResult.translatedText,
               voiceName: voiceName,
               languageCode: targetLanguage,
             ));
+
+            _paragraphs.add(TranslationParagraph(
+              id: 'p${_paragraphs.length + 1}',
+              originalText: sttResult.transcript,
+              translatedText: translateResult.translatedText,
+              sourceLanguage: sourceLanguage,
+              targetLanguage: targetLanguage,
+              timestamp: DateTime.now(),
+            ));
+            _persistCurrentSession();
           }
 
-          // 3. Emitir chunk a la UI
           _chunkController?.add(TranslationChunk(
             originalText: sttResult.transcript,
             translatedText: translateResult.translatedText,
@@ -84,11 +109,24 @@ class TranslationRepositoryImpl implements TranslationRepository {
           _chunkController?.addError(e);
         }
       },
-      onError: (error) => _chunkController?.addError(error),
+      onError: (e) => _chunkController?.addError(e),
       onDone: () => _chunkController?.close(),
     );
 
     yield* _chunkController!.stream;
+  }
+
+  Future<void> _persistCurrentSession() async {
+    final session = TranslationSession(
+      id: _currentSessionId,
+      name: _sessionName,
+      sourceLanguage: _sourceLanguage,
+      targetLanguage: _targetLanguage,
+      paragraphs: List.from(_paragraphs),
+      createdAt: DateTime.now(),
+      durationMs: DateTime.now().millisecondsSinceEpoch - _startTimeMs,
+    );
+    await _local.saveSession(TranslationSessionModel.fromEntity(session));
   }
 
   @override
@@ -98,33 +136,33 @@ class TranslationRepositoryImpl implements TranslationRepository {
       await _sttSubscription?.cancel();
       _sttSubscription = null;
 
-      final durationMs =
-          DateTime.now().millisecondsSinceEpoch - _startTimeMs;
+      final durationMs = DateTime.now().millisecondsSinceEpoch - _startTimeMs;
 
-      final fullOriginal = _pendingTexts.join(' ');
-
-      final session = TranslationSession(
-        id: _uuid.v4(),
+      // Cargar la sesión guardada (con todos los párrafos)
+      final saved = await _local.getSession(_currentSessionId);
+      final session = saved?.toEntity() ?? TranslationSession(
+        id: _currentSessionId,
         sourceLanguage: _sourceLanguage,
         targetLanguage: _targetLanguage,
-        originalText: fullOriginal,
-        translatedText: '[Traducción] $fullOriginal',
+        paragraphs: List.from(_paragraphs),
         createdAt: DateTime.now(),
         durationMs: durationMs,
       );
 
-      final model = TranslationSessionModel.fromEntity(session);
-      await _local.saveSession(model);
-      _pendingTexts.clear();
-
+      _paragraphs = [];
       return Right(session);
     } on Exception catch (e) {
-      return Left(
-        UnexpectedFailure(
-          message: 'Error al detener traducción',
-          originalError: e,
-        ),
-      );
+      return Left(UnexpectedFailure(message: 'Error al detener', originalError: e));
+    }
+  }
+
+  @override
+  Future<Either<Failure, TranslationSession?>> getSession(String id) async {
+    try {
+      final model = await _local.getSession(id);
+      return Right(model?.toEntity());
+    } on Exception catch (e) {
+      return Left(StorageFailure(message: 'Error al obtener sesión', originalError: e as Object?));
     }
   }
 
@@ -132,15 +170,9 @@ class TranslationRepositoryImpl implements TranslationRepository {
   Future<Either<Failure, List<TranslationSession>>> getHistory() async {
     try {
       final models = await _local.getAllSessions();
-      final sessions = models.map((m) => m.toEntity()).toList();
-      return Right(sessions);
+      return Right(models.map((m) => m.toEntity()).toList());
     } on Exception catch (e) {
-      return Left(
-        StorageFailure(
-          message: 'Error al obtener historial',
-          originalError: e as Object?,
-        ),
-      );
+      return Left(StorageFailure(message: 'Error al obtener historial', originalError: e as Object?));
     }
   }
 
@@ -150,12 +182,7 @@ class TranslationRepositoryImpl implements TranslationRepository {
       await _local.deleteSession(sessionId);
       return const Right(null);
     } on Exception catch (e) {
-      return Left(
-        StorageFailure(
-          message: 'Error al eliminar sesión',
-          originalError: e as Object?,
-        ),
-      );
+      return Left(StorageFailure(message: 'Error al eliminar', originalError: e as Object?));
     }
   }
 
@@ -165,12 +192,7 @@ class TranslationRepositoryImpl implements TranslationRepository {
       await _local.clearAll();
       return const Right(null);
     } on Exception catch (e) {
-      return Left(
-        StorageFailure(
-          message: 'Error al limpiar historial',
-          originalError: e as Object?,
-        ),
-      );
+      return Left(StorageFailure(message: 'Error al limpiar', originalError: e as Object?));
     }
   }
 }
