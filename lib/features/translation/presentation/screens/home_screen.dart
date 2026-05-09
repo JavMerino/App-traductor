@@ -1,10 +1,12 @@
 import 'package:audio_traductor/core/constants/app_constants.dart';
+import 'package:audio_traductor/core/services/audio_device_manager.dart';
 import 'package:audio_traductor/core/services/bluetooth_provider.dart';
 import 'package:audio_traductor/features/translation/domain/entities/translation_session.dart';
 import 'package:audio_traductor/features/translation/presentation/providers/translation_provider.dart';
 import 'package:audio_traductor/features/translation/presentation/providers/audio_settings_provider.dart';
 import 'package:audio_traductor/features/translation/presentation/widgets/language_selector.dart';
 import 'package:audio_traductor/features/translation/presentation/widgets/recording_button.dart';
+import 'package:audio_traductor/features/translation/presentation/screens/settings_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -16,6 +18,7 @@ class HomeScreen extends ConsumerWidget {
     final state = ref.watch(translationProvider);
     final settings = ref.watch(audioSettingsProvider);
     final bt = ref.watch(bluetoothProvider);
+    final devices = ref.watch(audioDevicesProvider);
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
 
@@ -117,6 +120,74 @@ class HomeScreen extends ConsumerWidget {
               ),
             ),
 
+            // ── Dispositivos de entrada/salida ──
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              child: Row(
+                children: [
+                  // Entrada
+                  Expanded(
+                    child: InkWell(
+                      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen())),
+                      borderRadius: BorderRadius.circular(12),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 10),
+                        decoration: BoxDecoration(
+                          color: colorScheme.surface.withValues(alpha: 0.35),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: colorScheme.outlineVariant.withValues(alpha: 0.25)),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(Icons.mic, size: 16, color: colorScheme.primary),
+                            const SizedBox(width: 8),
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('ENTRADA', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: colorScheme.primary, letterSpacing: 1)),
+                                Text(_deviceName(devices, devices.selectedInputId) ?? 'Micrófono del sistema',
+                                    style: theme.textTheme.labelSmall?.copyWith(color: colorScheme.onSurfaceVariant), overflow: TextOverflow.ellipsis),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  // Salida
+                  Expanded(
+                    child: InkWell(
+                      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen())),
+                      borderRadius: BorderRadius.circular(12),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 10),
+                        decoration: BoxDecoration(
+                          color: colorScheme.surface.withValues(alpha: 0.35),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: colorScheme.outlineVariant.withValues(alpha: 0.25)),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(Icons.speaker, size: 16, color: colorScheme.primary),
+                            const SizedBox(width: 8),
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('SALIDA', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: colorScheme.primary, letterSpacing: 1)),
+                                Text(_deviceName(devices, devices.selectedOutputId) ?? 'Altavoces',
+                                    style: theme.textTheme.labelSmall?.copyWith(color: colorScheme.onSurfaceVariant), overflow: TextOverflow.ellipsis),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
             // ── Botón de grabación ──
             Expanded(
               child: Center(
@@ -170,6 +241,13 @@ class HomeScreen extends ConsumerWidget {
       builder: (ctx) => _SessionPickerSheet(ref: ref),
     );
   }
+}
+
+/// Busca el nombre de un dispositivo por su ID en el estado de dispositivos.
+String? _deviceName(AudioDevicesState state, String? id) {
+  if (id == null) return null;
+  final device = state.devices.where((d) => d.id == id).firstOrNull;
+  return device?.name;
 }
 
 // ── Session picker bottom sheet ─────────────────────────────────
