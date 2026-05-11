@@ -267,21 +267,21 @@ class _SessionCard extends StatelessWidget {
 
   void _openSession(BuildContext context) {
     Navigator.push(context, MaterialPageRoute(
-      builder: (_) => _SessionDetailScreen(session: session),
+      builder: (_) => SessionDetailScreen(session: session),
     ));
   }
 }
 
 /// Vista conversación: derecha = original, izquierda = traducción.
-class _SessionDetailScreen extends StatefulWidget {
+class SessionDetailScreen extends StatefulWidget {
   final TranslationSession session;
-  const _SessionDetailScreen({required this.session});
+  const SessionDetailScreen({super.key, required this.session});
 
   @override
-  State<_SessionDetailScreen> createState() => _SessionDetailScreenState();
+  State<SessionDetailScreen> createState() => _SessionDetailScreenState();
 }
 
-class _SessionDetailScreenState extends State<_SessionDetailScreen> {
+class _SessionDetailScreenState extends State<SessionDetailScreen> {
   bool _exporting = false;
 
   Future<void> _exportPdf() async {
@@ -335,7 +335,7 @@ class _SessionDetailScreenState extends State<_SessionDetailScreen> {
                   child: Column(
                     children: [
                       // Original → derecha (color primario)
-                      _Bubble(
+                      Bubble(
                         text: p.originalText,
                         flag: srcFlag,
                         color: colorScheme.primaryContainer,
@@ -344,7 +344,7 @@ class _SessionDetailScreenState extends State<_SessionDetailScreen> {
                       ),
                       const SizedBox(height: 4),
                       // Traducción → izquierda (color secundario)
-                      _Bubble(
+                      Bubble(
                         text: p.translatedText,
                         flag: tgtFlag,
                         color: colorScheme.secondaryContainer,
@@ -360,14 +360,14 @@ class _SessionDetailScreenState extends State<_SessionDetailScreen> {
   }
 }
 
-class _Bubble extends StatelessWidget {
+class Bubble extends StatelessWidget {
   final String text;
   final String flag;
   final Color color;
   final Color textColor;
   final bool isRight;
 
-  const _Bubble({
+  const Bubble({
     required this.text,
     required this.flag,
     required this.color,

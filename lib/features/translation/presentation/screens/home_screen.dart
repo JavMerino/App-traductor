@@ -1,9 +1,11 @@
 import 'package:audio_traductor/core/constants/app_constants.dart';
 import 'package:audio_traductor/core/services/audio_device_manager.dart';
 import 'package:audio_traductor/core/services/bluetooth_provider.dart';
+import 'package:audio_traductor/features/translation/domain/entities/translation_paragraph.dart';
 import 'package:audio_traductor/features/translation/domain/entities/translation_session.dart';
 import 'package:audio_traductor/features/translation/presentation/providers/translation_provider.dart';
 import 'package:audio_traductor/features/translation/presentation/providers/audio_settings_provider.dart';
+import 'package:audio_traductor/features/translation/presentation/screens/history_screen.dart';
 import 'package:audio_traductor/features/translation/presentation/widgets/language_selector.dart';
 import 'package:audio_traductor/features/translation/presentation/widgets/recording_button.dart';
 import 'package:audio_traductor/features/translation/presentation/screens/settings_screen.dart';
@@ -191,49 +193,78 @@ class HomeScreen extends ConsumerWidget {
 
             // ── Botón de grabación ──
             Expanded(
-              child: Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    RecordingButton(
-                      isStreaming: state.isStreaming,
-                      onStart: () {
-                        ref.read(translationProvider.notifier).startTranslation(
-                          sourceLanguage: settings.sourceLanguage,
-                          targetLanguage: settings.targetLanguage,
-                          voiceName: settings.voiceName,
-                          speed: settings.speed,
-                          existingSessionId: state.currentSessionId,
-                          sessionName: state.sessionName,
-                        );
-                      },
-                      onStop: () => ref.read(translationProvider.notifier).stopTranslation(),
+              child: Column(
+                children: [
+                  if (state.paragraphs.isEmpty) const Spacer(),
+                  Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        RecordingButton(
+                          isStreaming: state.isStreaming,
+                          onStart: () {
+                            ref.read(translationProvider.notifier).startTranslation(
+                              sourceLanguage: settings.sourceLanguage,
+                              targetLanguage: settings.targetLanguage,
+                              voiceName: settings.voiceName,
+                              speed: settings.speed,
+                              existingSessionId: state.currentSessionId,
+                              sessionName: state.sessionName,
+                            );
+                          },
+                          onStop: () => ref.read(translationProvider.notifier).stopTranslation(),
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          switch (state.status) {
+                            TranslationStatus.idle => 'Toca para empezar',
+                            TranslationStatus.listening => 'Escuchando...',
+                            TranslationStatus.translating => 'Traduciendo...',
+                            TranslationStatus.playing => 'Reproduciendo...',
+                            TranslationStatus.error => 'Error',
+                          },
+                          style: theme.textTheme.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 12),
-                    Text(
-                      switch (state.status) {
-                        TranslationStatus.idle => 'Toca para empezar',
-                        TranslationStatus.listening => 'Escuchando...',
-                        TranslationStatus.translating => 'Traduciendo...',
-                        TranslationStatus.playing => 'Reproduciendo...',
-                        TranslationStatus.error => 'Error',
-                      },
-                      style: theme.textTheme.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant),
+                  ),
+                  if (state.paragraphs.isEmpty) const Spacer(),
+
+                  // ── Párrafos en vivo (últimos 4) ──
+                  if (state.paragraphs.isNotEmpty) ...[
+                    const SizedBox(height: 16),
+                    _LiveParagraphs(
+                      paragraphs: state.paragraphs,
+                      playingId: state.playingParagraphId,
+                      onTap: () => _openLiveSession(context, ref),
                     ),
-                    // Párrafos en vivo
-                    if (state.paragraphs.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 16),
-                        child: Text('${state.paragraphs.length} párrafo(s)', style: theme.textTheme.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant)),
-                      ),
                   ],
-                ),
+                ],
               ),
             ),
           ],
         ),
       ),
     );
+  }
+
+  void _openLiveSession(BuildContext context, WidgetRef ref) {
+    final state = ref.read(translationProvider);
+    if (state.paragraphs.isEmpty) return;
+
+    final session = TranslationSession(
+      id: state.currentSessionId ?? 'live',
+      name: state.sessionName.isNotEmpty ? state.sessionName : 'Sesión en vivo',
+      sourceLanguage: state.paragraphs.first.sourceLanguage,
+      targetLanguage: state.paragraphs.first.targetLanguage,
+      paragraphs: state.paragraphs,
+      createdAt: DateTime.now(),
+      durationMs: 0,
+    );
+
+    Navigator.push(context, MaterialPageRoute(
+      builder: (_) => SessionDetailScreen(session: session),
+    ));
   }
 
   void _showSessionPicker(BuildContext context, WidgetRef ref) async {
@@ -381,5 +412,132 @@ class _SessionPickerSheetState extends ConsumerState<_SessionPickerSheet> {
     // Crear una sesión nueva con solo el nombre (se va a crear en el repo cuando se presione grabar)
     widget.ref.read(translationProvider.notifier).setSessionInfo('_new_', name);
     Navigator.pop(context);
+  }
+}
+
+// ── Tarjeta de párrafo en vivo ──────────────────────────────────
+
+/// Lista de los últimos 4 párrafos ocupando el espacio disponible.
+class _LiveParagraphs extends StatelessWidget {
+  final List<TranslationParagraph> paragraphs;
+  final String? playingId;
+  final VoidCallback onTap;
+
+  const _LiveParagraphs({
+    required this.paragraphs,
+    required this.playingId,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final recent = paragraphs.length > 4
+        ? paragraphs.sublist(paragraphs.length - 4)
+        : paragraphs;
+
+    return Expanded(
+      child: ListView.builder(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        itemCount: recent.length,
+        itemBuilder: (_, i) {
+          final p = recent[i];
+          return _ParagraphCard(
+            paragraph: p,
+            isPlaying: playingId == p.id,
+            onTap: onTap,
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _ParagraphCard extends StatelessWidget {
+  final TranslationParagraph paragraph;
+  final bool isPlaying;
+  final VoidCallback onTap;
+
+  const _ParagraphCard({
+    required this.paragraph,
+    required this.isPlaying,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // ── Original ──
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.mic, size: 14, color: colorScheme.onSurfaceVariant.withValues(alpha: 0.6)),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      paragraph.originalText,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
+                        height: 1.3,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              // ── Traducción ──
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    isPlaying ? Icons.volume_up : Icons.translate,
+                    size: 14,
+                    color: isPlaying ? colorScheme.primary : colorScheme.primary.withValues(alpha: 0.6),
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      paragraph.translatedText,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: isPlaying ? colorScheme.primary : colorScheme.onSurface,
+                        fontWeight: isPlaying ? FontWeight.w600 : FontWeight.normal,
+                        height: 1.3,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  if (isPlaying)
+                    Padding(
+                      padding: const EdgeInsets.only(left: 4),
+                      child: SizedBox(
+                        width: 12,
+                        height: 12,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: colorScheme.primary,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
