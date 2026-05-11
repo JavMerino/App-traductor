@@ -23,6 +23,7 @@ class HomeScreen extends ConsumerWidget {
     final colorScheme = theme.colorScheme;
 
     return Scaffold(
+      resizeToAvoidBottomInset: false,
       appBar: AppBar(
         title: const Text(AppConstants.appName),
         actions: [
@@ -201,6 +202,7 @@ class HomeScreen extends ConsumerWidget {
                           sourceLanguage: settings.sourceLanguage,
                           targetLanguage: settings.targetLanguage,
                           voiceName: settings.voiceName,
+                          speed: settings.speed,
                           existingSessionId: state.currentSessionId,
                           sessionName: state.sessionName,
                         );
@@ -234,11 +236,16 @@ class HomeScreen extends ConsumerWidget {
     );
   }
 
-  void _showSessionPicker(BuildContext context, WidgetRef ref) {
+  void _showSessionPicker(BuildContext context, WidgetRef ref) async {
+    // Precargar sesiones antes de mostrar el sheet para evitar lag
+    final sessions = await ref.read(historyProvider.future);
+
+    if (!context.mounted) return;
     showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (ctx) => _SessionPickerSheet(ref: ref),
+      builder: (ctx) => _SessionPickerSheet(ref: ref, sessions: sessions),
     );
   }
 }
@@ -254,7 +261,8 @@ String? _deviceName(AudioDevicesState state, String? id) {
 
 class _SessionPickerSheet extends ConsumerStatefulWidget {
   final WidgetRef ref;
-  const _SessionPickerSheet({required this.ref});
+  final List<TranslationSession> sessions;
+  const _SessionPickerSheet({required this.ref, required this.sessions});
 
   @override
   ConsumerState<_SessionPickerSheet> createState() => _SessionPickerSheetState();
@@ -274,9 +282,12 @@ class _SessionPickerSheetState extends ConsumerState<_SessionPickerSheet> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+    return AnimatedPadding(
+      duration: const Duration(milliseconds: 200),
+      curve: Curves.easeOutCubic,
+      padding: EdgeInsets.fromLTRB(20, 12, 20, 24 + bottomInset),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -285,82 +296,81 @@ class _SessionPickerSheetState extends ConsumerState<_SessionPickerSheet> {
           const SizedBox(height: 16),
 
           // ── Nueva sesión ──
-          if (!_showNew)
-            ListTile(
-              leading: Icon(Icons.add_circle_outline, color: colorScheme.primary),
-              title: const Text('Nueva sesión'),
-              subtitle: const Text('Crear una sesión en blanco'),
-              onTap: () => setState(() => _showNew = true),
-            ),
-
-          if (_showNew) ...[
-            TextField(
-              controller: _nameController,
-              autofocus: true,
-              decoration: InputDecoration(
-                hintText: 'Nombre de la sesión (opcional)',
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-              ),
-            ),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                Expanded(
-                  child: FilledButton(
-                    onPressed: () {
-                      _createNew(context);
-                    },
-                    child: const Text('Crear'),
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 200),
+            child: !_showNew
+                ? ListTile(
+                    key: const ValueKey('new-btn'),
+                    leading: Icon(Icons.add_circle_outline, color: colorScheme.primary),
+                    title: const Text('Nueva sesión'),
+                    subtitle: const Text('Crear una sesión en blanco'),
+                    onTap: () => setState(() => _showNew = true),
+                  )
+                : Column(
+                    key: const ValueKey('new-form'),
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      TextField(
+                        controller: _nameController,
+                        autofocus: true,
+                        decoration: InputDecoration(
+                          hintText: 'Nombre de la sesión (opcional)',
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: FilledButton(
+                              onPressed: () => _createNew(context),
+                              child: const Text('Crear'),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          TextButton(onPressed: () => setState(() => _showNew = false), child: const Text('Cancelar')),
+                        ],
+                      ),
+                    ],
                   ),
-                ),
-                const SizedBox(width: 8),
-                TextButton(onPressed: () => setState(() => _showNew = false), child: const Text('Cancelar')),
-              ],
-            ),
-          ],
+          ),
 
           // ── Sesiones existentes ──
-          FutureBuilder<List<TranslationSession>>(
-            future: widget.ref.read(historyProvider.future),
-            builder: (context, snapshot) {
-              final sessions = snapshot.data ?? [];
-              if (sessions.isEmpty && _showNew) return const SizedBox.shrink();
-              if (sessions.isEmpty) return const Padding(padding: EdgeInsets.only(top: 16), child: Text('No hay sesiones guardadas aún'));
-
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (!_showNew) const SizedBox(height: 8),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    child: Text('Sesiones guardadas', style: theme.textTheme.labelMedium?.copyWith(color: colorScheme.onSurfaceVariant)),
-                  ),
-                  ConstrainedBox(
-                    constraints: const BoxConstraints(maxHeight: 250),
-                    child: ListView.separated(
-                      shrinkWrap: true,
-                      itemCount: sessions.length,
-                      separatorBuilder: (context, index) => const Divider(height: 1),
-                      itemBuilder: (_, i) {
-                        final s = sessions[i];
-                        return ListTile(
-                          dense: true,
-                          leading: Icon(Icons.chat_outlined, color: colorScheme.primary),
-                          title: Text(s.name.isNotEmpty ? s.name : 'Sesión', overflow: TextOverflow.ellipsis),
-                          subtitle: Text('${s.paragraphCount} párrafos • ${s.formattedDate}', style: const TextStyle(fontSize: 12)),
-                          trailing: const Icon(Icons.chevron_right, size: 18),
-                          onTap: () {
-                            widget.ref.read(translationProvider.notifier).setSessionInfo(s.id, s.name);
-                            Navigator.pop(context);
-                          },
-                        );
-                      },
-                    ),
-                  ),
-                ],
-              );
-            },
-          ),
+          if (widget.sessions.isNotEmpty && !_showNew) ...[
+            const SizedBox(height: 8),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Text('Sesiones guardadas', style: theme.textTheme.labelMedium?.copyWith(color: colorScheme.onSurfaceVariant)),
+            ),
+          ],
+          if (widget.sessions.isNotEmpty)
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 250),
+              child: ListView.separated(
+                shrinkWrap: true,
+                itemCount: widget.sessions.length,
+                separatorBuilder: (context, index) => const Divider(height: 1),
+                itemBuilder: (_, i) {
+                  final s = widget.sessions[i];
+                  return ListTile(
+                    dense: true,
+                    leading: Icon(Icons.chat_outlined, color: colorScheme.primary),
+                    title: Text(s.name.isNotEmpty ? s.name : 'Sesión', overflow: TextOverflow.ellipsis),
+                    subtitle: Text('${s.paragraphCount} párrafos • ${s.formattedDate}', style: const TextStyle(fontSize: 12)),
+                    trailing: const Icon(Icons.chevron_right, size: 18),
+                    onTap: () {
+                      widget.ref.read(translationProvider.notifier).setSessionInfo(s.id, s.name);
+                      Navigator.pop(context);
+                    },
+                  );
+                },
+              ),
+            )
+          else if (!_showNew)
+            const Padding(
+              padding: EdgeInsets.only(top: 16),
+              child: Text('No hay sesiones guardadas aún'),
+            ),
         ],
       ),
     );

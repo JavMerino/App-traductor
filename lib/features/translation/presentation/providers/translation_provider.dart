@@ -52,6 +52,9 @@ class TranslationNotifier extends StateNotifier<TranslationState> {
 
   StreamSubscription? _subscription;
   int _counter = 0;
+  String _currentTargetLanguage = 'en';
+  String _currentVoiceName = '';
+  double _currentSpeed = 0.5;
 
   @override
   void dispose() {
@@ -63,12 +66,16 @@ class TranslationNotifier extends StateNotifier<TranslationState> {
     required String sourceLanguage,
     required String targetLanguage,
     required String voiceName,
+    required double speed,
     String? existingSessionId,
     String? sessionName,
   }) async {
     if (state.isStreaming) return;
 
     _counter = 0;
+    _currentTargetLanguage = targetLanguage;
+    _currentVoiceName = voiceName;
+    _currentSpeed = speed;
     state = state.copyWith(
       status: TranslationStatus.listening,
       isStreaming: true,
@@ -81,6 +88,7 @@ class TranslationNotifier extends StateNotifier<TranslationState> {
         sourceLanguage: sourceLanguage,
         targetLanguage: targetLanguage,
         voiceName: voiceName,
+        speed: speed,
         existingSessionId: existingSessionId,
         sessionName: sessionName,
       );
@@ -133,7 +141,10 @@ class TranslationNotifier extends StateNotifier<TranslationState> {
     state = state.copyWith(status: TranslationStatus.playing, playingParagraphId: paragraphId);
 
     unawaited(RealTtsDatasource.instance.synthesize(
-      text: p.translatedText, voiceName: '', languageCode: 'en',
+      text: p.translatedText,
+      voiceName: _currentVoiceName,
+      languageCode: _currentTargetLanguage,
+      speed: _currentSpeed,
     ).then((_) => _afterPlay()).catchError((_) => _afterPlay()));
   }
 

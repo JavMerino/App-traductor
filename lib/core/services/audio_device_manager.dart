@@ -53,6 +53,7 @@ class AudioDeviceNotifier extends StateNotifier<AudioDevicesState> {
   a.AudioSession? _session;
   StreamSubscription<Set<a.AudioDevice>>? _deviceSub;
   StreamSubscription<bool>? _btScanSub;
+  List<fbp.BluetoothDevice> _btDevices = [];
 
   AudioDeviceNotifier() : super(const AudioDevicesState()) {
     _init();
@@ -63,6 +64,7 @@ class AudioDeviceNotifier extends StateNotifier<AudioDevicesState> {
     _loadInitial();
     _listenChanges();
     _listenBT();
+    _loadConnectedBT();
   }
 
   Future<void> _loadInitial() async {
@@ -72,6 +74,17 @@ class AudioDeviceNotifier extends StateNotifier<AudioDevicesState> {
     } catch (_) {
       _fallbackDevices();
     }
+  }
+
+  /// Carga dispositivos BT ya conectados vía flutter_blue_plus.
+  /// audio_session no siempre detecta headsets Bluetooth en todos los Android.
+  Future<void> _loadConnectedBT() async {
+    try {
+      _btDevices = await fbp.FlutterBluePlus.connectedDevices;
+      // Reconstruir lista combinando audio_session + BT
+      final set = await _session?.getDevices() ?? {};
+      _updateFromSet(set);
+    } catch (_) {}
   }
 
   void _listenChanges() {
@@ -122,20 +135,78 @@ class AudioDeviceNotifier extends StateNotifier<AudioDevicesState> {
       ));
     }
 
-    // Limitar a 7 dispositivos máx (2 integrados + 5 externos)
-    state = state.copyWith(devices: devices.take(7).toList());
+    // Agregar dispositivos BT ya conectados que audio_session no detectó
+    for (final bt in _btDevices) {
+      final name = bt.platformName.isNotEmpty ? bt.platformName : bt.remoteId.str;
+      if (name.isEmpty) continue;
+      if (seen.any((s) => name.toLowerCase().contains(s.toLowerCase()) || s.contains(name.toLowerCase()))) continue;
+      seen.add(name.toLowerCase());
+
+      final id = bt.remoteId.str;
+
+      // Si es un headset (tiene mic), agregar como entrada Y salida
+      final hasMic = _isHeadset(name);
+      devices.add(AudioDevice(
+        id: '$id-out',
+        name: name,
+        isInput: false,
+        isOutput: true,
+        typeLabel: 'Bluetooth',
+        isConnected: true,
+      ));
+      if (hasMic) {
+        devices.add(AudioDevice(
+          id: '$id-in',
+          name: '$name 🎤',
+          isInput: true,
+          isOutput: false,
+          typeLabel: 'Bluetooth',
+          isConnected: true,
+        ));
+      }
+    }
+
+    // Limitar a 10 dispositivos máx
+    state = state.copyWith(devices: devices.take(10).toList());
+  }
+
+  /// Heurística: ¿el nombre sugiere que es un headset con micrófono?
+  bool _isHeadset(String name) {
+    final lower = name.toLowerCase();
+    return lower.contains('headset') ||
+        lower.contains('headphone') ||
+        lower.contains('auricular') ||
+        lower.contains('manos libres') ||
+        lower.contains('handsfree') ||
+        lower.contains('airpods') ||
+        lower.contains('buds') ||
+        lower.contains('earphone') ||
+        lower.contains('earbud');
   }
 
   void _fallbackDevices() {
-    state = state.copyWith(devices: [
+    final devices = <AudioDevice>[
       const AudioDevice(id: 'builtin-mic', name: 'Micrófono integrado', isInput: true, isOutput: false, typeLabel: 'Integrado', isConnected: true),
       const AudioDevice(id: 'builtin-speaker', name: 'Altavoz integrado', isInput: false, isOutput: true, typeLabel: 'Integrado', isConnected: true),
-    ]);
+    ];
+
+    // Intentar agregar dispositivos BT aunque audio_session haya fallado
+    for (final bt in _btDevices) {
+      final name = bt.platformName.isNotEmpty ? bt.platformName : bt.remoteId.str;
+      if (name.isEmpty) continue;
+      final id = bt.remoteId.str;
+      devices.add(AudioDevice(id: '$id-out', name: name, isInput: false, isOutput: true, typeLabel: 'Bluetooth', isConnected: true));
+      if (_isHeadset(name)) {
+        devices.add(AudioDevice(id: '$id-in', name: '$name 🎤', isInput: true, isOutput: false, typeLabel: 'Bluetooth', isConnected: true));
+      }
+    }
+
+    state = state.copyWith(devices: devices);
   }
 
   String _labelFor(String type) => switch (type) {
     'wiredHeadset' || 'wiredHeadphones' => 'Cable',
-    'bluetooth' || 'bluetoothA2DP' || 'bluetoothLE' => 'Bluetooth',
+    'bluetooth' || 'bluetoothA2DP' || 'bluetoothLE' || 'bluetoothSCOHeadset' || 'bluetoothHeadset' => 'Bluetooth',
     _ => 'Externo',
   };
 

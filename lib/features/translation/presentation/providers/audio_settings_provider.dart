@@ -9,7 +9,6 @@ class AudioSettings {
   final String targetLanguageName;
   final String voiceName;
   final String voiceDisplayName;
-  final double volume;
   final double speed;
 
   const AudioSettings({
@@ -19,8 +18,7 @@ class AudioSettings {
     this.targetLanguageName = 'Inglés',
     this.voiceName = 'en-US-Wavenet-D',
     this.voiceDisplayName = 'WaveNet (Hombre)',
-    this.volume = 1.0,
-    this.speed = 1.0,
+    this.speed = 0.5,
   });
 
   AudioSettings copyWith({
@@ -30,7 +28,6 @@ class AudioSettings {
     String? targetLanguageName,
     String? voiceName,
     String? voiceDisplayName,
-    double? volume,
     double? speed,
   }) {
     return AudioSettings(
@@ -40,7 +37,6 @@ class AudioSettings {
       targetLanguageName: targetLanguageName ?? this.targetLanguageName,
       voiceName: voiceName ?? this.voiceName,
       voiceDisplayName: voiceDisplayName ?? this.voiceDisplayName,
-      volume: volume ?? this.volume,
       speed: speed ?? this.speed,
     );
   }
@@ -78,10 +74,6 @@ class AudioSettingsNotifier extends StateNotifier<AudioSettings> {
 
   void setVoice(String name, String displayName) {
     state = state.copyWith(voiceName: name, voiceDisplayName: displayName);
-  }
-
-  void setVolume(double volume) {
-    state = state.copyWith(volume: volume.clamp(0.0, 1.0));
   }
 
   void setSpeed(double speed) {

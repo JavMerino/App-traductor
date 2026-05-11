@@ -14,8 +14,6 @@ class ColorSelector extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final surface = Theme.of(context).colorScheme.onSurface;
-
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: Row(
@@ -33,18 +31,13 @@ class ColorSelector extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: option.color,
                   shape: BoxShape.circle,
-                  border: Border.all(
-                    color: isSelected ? surface : Colors.transparent,
-                    width: isSelected ? 2.5 : 1.5,
-                  ),
-                  boxShadow: isSelected
-                      ? [
-                          BoxShadow(
-                            color: option.color.withValues(alpha: 0.5),
-                            blurRadius: 6,
-                            spreadRadius: 0.5,
-                          ),
-                        ]
+                  border: isSelected
+                      ? Border.all(
+                          color: option.color.computeLuminance() > 0.5
+                              ? option.color.withValues(alpha: 0.6)
+                              : option.color.withValues(alpha: 0.8),
+                          width: 2.5,
+                        )
                       : null,
                 ),
                 child: isSelected

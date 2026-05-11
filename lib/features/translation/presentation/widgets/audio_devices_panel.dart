@@ -1,7 +1,5 @@
-import 'dart:async';
 import 'package:audio_traductor/core/services/audio_device_manager.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_blue_plus/flutter_blue_plus.dart' as fbp;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 class AudioDevicesPanel extends ConsumerStatefulWidget {
@@ -12,21 +10,6 @@ class AudioDevicesPanel extends ConsumerStatefulWidget {
 }
 
 class _AudioDevicesPanelState extends ConsumerState<AudioDevicesPanel> {
-  final Set<String> _connectingBT = {};
-  StreamSubscription<List<fbp.ScanResult>>? _scanSub;
-
-  @override
-  void initState() {
-    super.initState();
-    _scanSub = fbp.FlutterBluePlus.scanResults.listen((_) {});
-  }
-
-  @override
-  void dispose() {
-    _scanSub?.cancel();
-    super.dispose();
-  }
-
   @override
   Widget build(BuildContext context) {
     final ds = ref.watch(audioDevicesProvider);
@@ -64,54 +47,6 @@ class _AudioDevicesPanelState extends ConsumerState<AudioDevicesPanel> {
 
         const SizedBox(height: 14),
 
-        // ── Buscar BT ──
-        FilledButton.tonalIcon(
-          onPressed: () {
-            fbp.FlutterBluePlus.startScan(timeout: const Duration(seconds: 10));
-            setState(() {});
-          },
-          icon: const Icon(Icons.bluetooth_searching),
-          label: const Text('Buscar dispositivos Bluetooth'),
-        ),
-
-        const SizedBox(height: 8),
-
-        // ── BT encontrados (no conectados) ──
-        StreamBuilder<List<fbp.ScanResult>>(
-          stream: fbp.FlutterBluePlus.scanResults,
-          builder: (context, snapshot) {
-            final results = snapshot.data ?? [];
-            if (results.isEmpty) return const SizedBox.shrink();
-
-            return Column(
-              children: results.map((r) {
-                final id = r.device.remoteId.str;
-                final name = r.device.platformName.isNotEmpty
-                    ? r.device.platformName
-                    : r.advertisementData.advName.isNotEmpty
-                        ? r.advertisementData.advName
-                        : id;
-                final isConnecting = _connectingBT.contains(id);
-
-                return ListTile(
-                  dense: true,
-                  leading: Icon(Icons.bluetooth, size: 20, color: colorScheme.primary),
-                  title: Text(name, overflow: TextOverflow.ellipsis),
-                  subtitle: Text('Señal: ${r.rssi} dBm'),
-                  trailing: isConnecting
-                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                      : TextButton(
-                          onPressed: () => _connectDevice(r),
-                          child: const Text('Conectar', style: TextStyle(fontSize: 12)),
-                        ),
-                );
-              }).toList(),
-            );
-          },
-        ),
-
-        const SizedBox(height: 8),
-
         // ── Info ──
         Container(
           padding: const EdgeInsets.all(10),
@@ -120,32 +55,12 @@ class _AudioDevicesPanelState extends ConsumerState<AudioDevicesPanel> {
             borderRadius: BorderRadius.circular(8),
           ),
           child: Text(
-            'Android rutea el audio automáticamente. Conectá los 2 dispositivos BT y seleccionalos arriba. Si el mic no funciona, desconectá el BT de salida y reconectalo después.',
+            'Android rutea el audio automáticamente. Conectá los dispositivos BT desde los ajustes del sistema y seleccionalos arriba.',
             style: TextStyle(fontSize: 11, color: colorScheme.onSurfaceVariant),
           ),
         ),
       ],
     );
-  }
-
-  Future<void> _connectDevice(fbp.ScanResult result) async {
-    final id = result.device.remoteId.str;
-    setState(() => _connectingBT.add(id));
-
-    try {
-      await result.device.connect();
-      // Esperar que el sistema detecte el nuevo dispositivo
-      await Future.delayed(const Duration(seconds: 1));
-      setState(() {});
-    } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('No se pudo conectar a ${result.device.platformName}')),
-        );
-      }
-    } finally {
-      setState(() => _connectingBT.remove(id));
-    }
   }
 
   Widget _sectionLabel(String text, ThemeData theme) {

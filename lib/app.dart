@@ -1,5 +1,6 @@
 import 'package:audio_traductor/core/theme/app_theme.dart';
 import 'package:audio_traductor/features/translation/presentation/providers/theme_provider.dart';
+import 'package:audio_traductor/features/translation/presentation/providers/translation_provider.dart';
 import 'package:audio_traductor/features/translation/presentation/screens/home_screen.dart';
 import 'package:audio_traductor/features/translation/presentation/screens/history_screen.dart';
 import 'package:audio_traductor/features/translation/presentation/screens/settings_screen.dart';
@@ -36,14 +37,17 @@ class AudioTraductorApp extends ConsumerWidget {
 /// en vez de mirar el provider. Esto evita:
 ///   1. Color incorrecto en primer inicio con modo sistema
 ///   2. Rebuild duplicado que ralentiza el cambio de tema
-class MainShell extends StatefulWidget {
+///
+/// Al cambiar a la pestaña Historial, invalida el provider para
+/// traer siempre los datos más frescos (sesiones recién grabadas).
+class MainShell extends ConsumerStatefulWidget {
   const MainShell({super.key});
 
   @override
-  State<MainShell> createState() => _MainShellState();
+  ConsumerState<MainShell> createState() => _MainShellState();
 }
 
-class _MainShellState extends State<MainShell> {
+class _MainShellState extends ConsumerState<MainShell> {
   int _currentIndex = 0;
 
   final _screens = const <Widget>[
@@ -77,6 +81,10 @@ class _MainShellState extends State<MainShell> {
           selectedIndex: _currentIndex,
           onDestinationSelected: (index) {
             setState(() => _currentIndex = index);
+            // Refrescar historial cada vez que se entra a la pestaña
+            if (index == 1) {
+              ref.invalidate(historyProvider);
+            }
           },
           destinations: const [
             NavigationDestination(

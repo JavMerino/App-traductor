@@ -122,38 +122,19 @@ class SettingsScreen extends ConsumerWidget {
           _SectionHeader(title: 'Audio'),
           Card(
             margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-            child: Column(
-              children: [
-                ListTile(
-                  leading: const Icon(Icons.volume_up),
-                  title: const Text('Volumen'),
-                  subtitle: Slider(
-                    value: settings.volume,
-                    min: 0.0,
-                    max: 1.0,
-                    divisions: 10,
-                    label: '${(settings.volume * 100).round()}%',
-                    onChanged: (value) {
-                      ref.read(audioSettingsProvider.notifier).setVolume(value);
-                    },
-                  ),
-                ),
-                const Divider(height: 1),
-                ListTile(
-                  leading: const Icon(Icons.speed),
-                  title: const Text('Velocidad'),
-                  subtitle: Slider(
-                    value: settings.speed,
-                    min: 0.5,
-                    max: 2.0,
-                    divisions: 15,
-                    label: '${settings.speed}x',
-                    onChanged: (value) {
-                      ref.read(audioSettingsProvider.notifier).setSpeed(value);
-                    },
-                  ),
-                ),
-              ],
+            child: ListTile(
+              leading: const Icon(Icons.speed),
+              title: const Text('Velocidad'),
+              subtitle: Slider(
+                value: settings.speed,
+                min: 0.5,
+                max: 2.0,
+                divisions: 15,
+                label: '${settings.speed}x',
+                onChanged: (value) {
+                  ref.read(audioSettingsProvider.notifier).setSpeed(value);
+                },
+              ),
             ),
           ),
 

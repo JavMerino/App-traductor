@@ -7,6 +7,7 @@ abstract class TranslationRepository {
     required String sourceLanguage,
     required String targetLanguage,
     required String voiceName,
+    required double speed,
     String? existingSessionId,
     String? sessionName,
   });

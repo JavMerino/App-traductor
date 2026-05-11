@@ -1,4 +1,5 @@
 import 'package:audio_traductor/core/errors/failures.dart';
+import 'package:audio_traductor/core/di/injection_container.dart';
 import 'package:audio_traductor/core/utils/language_utils.dart';
 import 'package:audio_traductor/features/history_export/data/repositories/export_repository_impl.dart';
 import 'package:audio_traductor/features/translation/domain/entities/translation_session.dart';
@@ -6,25 +7,111 @@ import 'package:audio_traductor/features/translation/presentation/providers/tran
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-/// Historial de sesiones. Al tocar una, muestra la conversación.
-class HistoryScreen extends ConsumerWidget {
+/// Historial de sesiones con eliminación múltiple.
+class HistoryScreen extends ConsumerStatefulWidget {
   const HistoryScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<HistoryScreen> createState() => _HistoryScreenState();
+}
+
+class _HistoryScreenState extends ConsumerState<HistoryScreen> {
+  bool _selectionMode = false;
+  final Set<String> _selectedIds = {};
+
+  void _toggleSelection(String id) {
+    setState(() {
+      if (_selectedIds.contains(id)) {
+        _selectedIds.remove(id);
+      } else {
+        _selectedIds.add(id);
+      }
+    });
+  }
+
+  void _selectAll(List<TranslationSession> sessions) {
+    setState(() {
+      if (_selectedIds.length == sessions.length) {
+        _selectedIds.clear();
+      } else {
+        _selectedIds.addAll(sessions.map((s) => s.id));
+      }
+    });
+  }
+
+  void _enterSelectionMode() => setState(() => _selectionMode = true);
+  void _exitSelectionMode() {
+    setState(() {
+      _selectionMode = false;
+      _selectedIds.clear();
+    });
+  }
+
+  Future<void> _deleteSelected() async {
+    if (_selectedIds.isEmpty) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Eliminar sesiones'),
+        content: Text('¿Eliminar ${_selectedIds.length} sesión(es)? Esta acción no se puede deshacer.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Eliminar'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    var errors = 0;
+    for (final id in _selectedIds.toList()) {
+      final result = await InjectionContainer.deleteSession(id);
+      result.fold((f) => errors++, (_) {});
+    }
+
+    ref.invalidate(historyProvider);
+    _exitSelectionMode();
+
+    if (errors > 0 && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$errors sesión(es) no se pudieron eliminar')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final historyAsync = ref.watch(historyProvider);
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Historial'),
+        title: Text(_selectionMode ? '${_selectedIds.length} seleccionada(s)' : 'Historial'),
+        leading: _selectionMode
+            ? IconButton(
+                icon: const Icon(Icons.close),
+                onPressed: _exitSelectionMode,
+              )
+            : null,
         actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh, size: 20),
-            tooltip: 'Actualizar',
-            onPressed: () => ref.invalidate(historyProvider),
-          ),
+          if (_selectionMode) ...[
+            IconButton(
+              icon: const Icon(Icons.delete_forever),
+              tooltip: 'Eliminar seleccionadas',
+              onPressed: _selectedIds.isNotEmpty ? _deleteSelected : null,
+            ),
+          ] else ...[
+            IconButton(
+              icon: const Icon(Icons.delete_outline, size: 20),
+              tooltip: 'Eliminar sesiones',
+              onPressed: _enterSelectionMode,
+            ),
+          ],
         ],
       ),
       body: historyAsync.when(
@@ -52,13 +139,46 @@ class HistoryScreen extends ConsumerWidget {
                   ],
                 ),
               )
-            : RefreshIndicator(
-                onRefresh: () async => ref.invalidate(historyProvider),
-                child: ListView.builder(
-                  padding: const EdgeInsets.only(top: 8, bottom: 24),
-                  itemCount: sessions.length,
-                  itemBuilder: (_, i) => _SessionCard(session: sessions[i], colorScheme: colorScheme, theme: theme),
-                ),
+            : Column(
+                children: [
+                  // Botón "Seleccionar todas" en modo selección
+                  if (_selectionMode)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      child: Row(
+                        children: [
+                          TextButton.icon(
+                            onPressed: () => _selectAll(sessions),
+                            icon: Icon(
+                              _selectedIds.length == sessions.length
+                                  ? Icons.deselect
+                                  : Icons.select_all,
+                              size: 18,
+                            ),
+                            label: Text(
+                              _selectedIds.length == sessions.length
+                                  ? 'Deseleccionar todas'
+                                  : 'Seleccionar todas',
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  Expanded(
+                    child: ListView.builder(
+                      padding: const EdgeInsets.only(top: 8, bottom: 24),
+                      itemCount: sessions.length,
+                      itemBuilder: (_, i) => _SessionCard(
+                        session: sessions[i],
+                        colorScheme: colorScheme,
+                        theme: theme,
+                        selectionMode: _selectionMode,
+                        isSelected: _selectedIds.contains(sessions[i].id),
+                        onToggleSelect: () => _toggleSelection(sessions[i].id),
+                      ),
+                    ),
+                  ),
+                ],
               ),
       ),
     );
@@ -69,8 +189,18 @@ class _SessionCard extends StatelessWidget {
   final TranslationSession session;
   final ColorScheme colorScheme;
   final ThemeData theme;
+  final bool selectionMode;
+  final bool isSelected;
+  final VoidCallback? onToggleSelect;
 
-  const _SessionCard({required this.session, required this.colorScheme, required this.theme});
+  const _SessionCard({
+    required this.session,
+    required this.colorScheme,
+    required this.theme,
+    this.selectionMode = false,
+    this.isSelected = false,
+    this.onToggleSelect,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -78,11 +208,20 @@ class _SessionCard extends StatelessWidget {
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
-        onTap: () => _openSession(context),
+        onTap: selectionMode ? onToggleSelect : () => _openSession(context),
         child: Padding(
           padding: const EdgeInsets.all(14),
           child: Row(
             children: [
+              // Checkbox en modo selección
+              if (selectionMode)
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: Icon(
+                    isSelected ? Icons.check_circle : Icons.radio_button_unchecked,
+                    color: isSelected ? colorScheme.primary : colorScheme.onSurfaceVariant.withValues(alpha: 0.4),
+                  ),
+                ),
               // Info
               Expanded(
                 child: Column(
@@ -115,8 +254,10 @@ class _SessionCard extends StatelessWidget {
                   ],
                 ),
               ),
-              const SizedBox(width: 8),
-              Icon(Icons.chevron_right, color: colorScheme.onSurfaceVariant),
+              if (!selectionMode) ...[
+                const SizedBox(width: 8),
+                Icon(Icons.chevron_right, color: colorScheme.onSurfaceVariant),
+              ],
             ],
           ),
         ),
@@ -168,6 +309,7 @@ class _SessionDetailScreenState extends State<_SessionDetailScreen> {
     final colorScheme = theme.colorScheme;
 
     return Scaffold(
+      backgroundColor: colorScheme.surface,
       appBar: AppBar(
         title: Text(widget.session.name.isNotEmpty ? widget.session.name : 'Sesión'),
         actions: [

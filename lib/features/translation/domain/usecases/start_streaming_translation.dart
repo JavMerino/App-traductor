@@ -9,6 +9,7 @@ class StartStreamingTranslation {
     required String sourceLanguage,
     required String targetLanguage,
     required String voiceName,
+    required double speed,
     String? existingSessionId,
     String? sessionName,
   }) {
@@ -16,6 +17,7 @@ class StartStreamingTranslation {
       sourceLanguage: sourceLanguage,
       targetLanguage: targetLanguage,
       voiceName: voiceName,
+      speed: speed,
       existingSessionId: existingSessionId,
       sessionName: sessionName,
     );

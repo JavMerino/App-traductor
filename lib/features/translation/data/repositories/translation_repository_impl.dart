@@ -27,6 +27,8 @@ class TranslationRepositoryImpl implements TranslationRepository {
   String _targetLanguage = 'en';
   String _currentSessionId = '';
   String _sessionName = '';
+  double _speed = 0.5;
+  Future<void>? _ttsQueue; // encadena reproducciones TTS
 
   TranslationRepositoryImpl({
     required SttDatasource stt,
@@ -43,6 +45,7 @@ class TranslationRepositoryImpl implements TranslationRepository {
     required String sourceLanguage,
     required String targetLanguage,
     required String voiceName,
+    required double speed,
     String? existingSessionId,
     String? sessionName,
   }) async* {
@@ -50,6 +53,7 @@ class TranslationRepositoryImpl implements TranslationRepository {
     _chunkController = StreamController<TranslationChunk>.broadcast();
     _sourceLanguage = sourceLanguage;
     _targetLanguage = targetLanguage;
+    _speed = speed;
 
     // Guardar nombre personalizado
     _sessionName = sessionName ?? 'Sesión ${DateFormat('dd/MM HH:mm').format(DateTime.now())}';
@@ -83,11 +87,15 @@ class TranslationRepositoryImpl implements TranslationRepository {
           );
 
           if (sttResult.isFinal) {
-            unawaited(_tts.synthesize(
-              text: translateResult.translatedText,
-              voiceName: voiceName,
-              languageCode: targetLanguage,
-            ));
+            // Encadenar reproducción: esperar a que termine la anterior
+            _ttsQueue = (_ttsQueue ?? Future.value()).then((_) {
+              return _tts.synthesize(
+                text: translateResult.translatedText,
+                voiceName: voiceName,
+                languageCode: targetLanguage,
+                speed: _speed,
+              );
+            }).catchError((_) => const TtsResult(audioBase64: '', audioFormat: ''));
 
             _paragraphs.add(TranslationParagraph(
               id: 'p${_paragraphs.length + 1}',
@@ -132,13 +140,23 @@ class TranslationRepositoryImpl implements TranslationRepository {
   @override
   Future<Either<Failure, TranslationSession>> stopTranslation() async {
     try {
+      // 1. Detener el micrófono — no más párrafos nuevos
       await _stt.stop();
       await _sttSubscription?.cancel();
       _sttSubscription = null;
 
+      // 2. Esperar a que termine toda la cola de TTS (máx 15s)
+      if (_ttsQueue != null) {
+        try {
+          await _ttsQueue!.timeout(const Duration(seconds: 15));
+        } catch (_) {
+          // Timeout o error — seguimos igual, no bloqueamos
+        }
+        _ttsQueue = null;
+      }
+
       final durationMs = DateTime.now().millisecondsSinceEpoch - _startTimeMs;
 
-      // Cargar la sesión guardada (con todos los párrafos)
       final saved = await _local.getSession(_currentSessionId);
       final session = saved?.toEntity() ?? TranslationSession(
         id: _currentSessionId,
