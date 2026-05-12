@@ -42,6 +42,13 @@ class RealTtsDatasource implements TtsDatasource {
 
   RealTtsDatasource._() : _tts = FlutterTts();
 
+  /// Detiene la reproducción TTS en curso.
+  Future<void> stop() async {
+    try {
+      await _tts.stop();
+    } catch (_) {}
+  }
+
   /// Busca voces reales del dispositivo y matchea por idioma + género.
   /// Usa [VoiceActor.forLanguage] para saber si la voz seleccionada
   /// es masculina o femenina, y busca una voz del dispositivo que coincida.

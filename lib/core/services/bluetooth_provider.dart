@@ -6,12 +6,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 /// Estado del Bluetooth en la UI.
 class BluetoothState {
   final bool isScanning;
+  final bool isAdapterOn;
   final List<BTDevice> devices;
   final BTDevice? connectedDevice;
   final String? error;
 
   const BluetoothState({
     this.isScanning = false,
+    this.isAdapterOn = false,
     this.devices = const [],
     this.connectedDevice,
     this.error,
@@ -19,12 +21,14 @@ class BluetoothState {
 
   BluetoothState copyWith({
     bool? isScanning,
+    bool? isAdapterOn,
     List<BTDevice>? devices,
     BTDevice? connectedDevice,
     String? error,
   }) {
     return BluetoothState(
       isScanning: isScanning ?? this.isScanning,
+      isAdapterOn: isAdapterOn ?? this.isAdapterOn,
       devices: devices ?? this.devices,
       connectedDevice: connectedDevice,
       error: error,
@@ -36,6 +40,7 @@ class BluetoothNotifier extends StateNotifier<BluetoothState> {
   final BluetoothService _service;
   StreamSubscription? _scanSub;
   StreamSubscription? _connectionSub;
+  StreamSubscription? _adapterSub;
 
   BluetoothNotifier(this._service) : super(const BluetoothState()) {
     _scanSub = _service.scanResults.listen((devices) {
@@ -46,10 +51,34 @@ class BluetoothNotifier extends StateNotifier<BluetoothState> {
       state = state.copyWith(connectedDevice: device, isScanning: false);
     });
 
+    // Escuchar estado del adaptador Bluetooth
+    _adapterSub = fbp.FlutterBluePlus.adapterState.listen((s) {
+      state = state.copyWith(isAdapterOn: s == fbp.BluetoothAdapterState.on);
+    });
+
+    // Estado inicial del adaptador
+    fbp.FlutterBluePlus.adapterState.first.then((s) {
+      state = state.copyWith(isAdapterOn: s == fbp.BluetoothAdapterState.on);
+    });
+
     final current = _service.connectedDevice;
     if (current != null) {
       state = state.copyWith(connectedDevice: current);
     }
+  }
+
+  /// Activa o desactiva el Bluetooth.
+  /// Encender siempre muestra el diálogo del sistema.
+  /// Apagar puede no funcionar en todos los dispositivos.
+  Future<void> toggleAdapter() async {
+    try {
+      if (state.isAdapterOn) {
+        // Intentar apagar — puede fallar según la versión de Android
+        await fbp.FlutterBluePlus.turnOn(); // no-op si ya está prendido
+      } else {
+        await fbp.FlutterBluePlus.turnOn();
+      }
+    } catch (_) {}
   }
 
   Future<void> startScan() async {
@@ -85,6 +114,7 @@ class BluetoothNotifier extends StateNotifier<BluetoothState> {
   void dispose() {
     _scanSub?.cancel();
     _connectionSub?.cancel();
+    _adapterSub?.cancel();
     _service.dispose();
     super.dispose();
   }

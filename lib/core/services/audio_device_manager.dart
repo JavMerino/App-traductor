@@ -61,10 +61,30 @@ class AudioDeviceNotifier extends StateNotifier<AudioDevicesState> {
 
   Future<void> _init() async {
     _session = await a.AudioSession.instance;
+    await _configureSession();
     _loadInitial();
     _listenChanges();
     _listenBT();
     _loadConnectedBT();
+  }
+
+  /// Configura la sesión de audio para Bluetooth.
+  /// voiceCommunication activa el perfil SCO (bidireccional) en Android,
+  /// necesario para headsets con micrófono.
+  Future<void> _configureSession() async {
+    try {
+      await _session?.configure(a.AudioSessionConfiguration(
+        avAudioSessionCategory: a.AVAudioSessionCategory.playAndRecord,
+        avAudioSessionCategoryOptions: a.AVAudioSessionCategoryOptions.allowBluetooth |
+            a.AVAudioSessionCategoryOptions.defaultToSpeaker,
+        androidAudioAttributes: const a.AndroidAudioAttributes(
+          contentType: a.AndroidAudioContentType.speech,
+          usage: a.AndroidAudioUsage.voiceCommunication,
+        ),
+        androidAudioFocusGainType: a.AndroidAudioFocusGainType.gain,
+      ));
+      await _session?.setActive(true);
+    } catch (_) {}
   }
 
   Future<void> _loadInitial() async {
@@ -102,10 +122,12 @@ class AudioDeviceNotifier extends StateNotifier<AudioDevicesState> {
 
   void selectInput(String id) {
     state = state.copyWith(selectedInputId: id);
+    _configureSession();
   }
 
   void selectOutput(String id) {
     state = state.copyWith(selectedOutputId: id);
+    _configureSession();
   }
 
   void _updateFromSet(Set<a.AudioDevice> set) {
@@ -144,8 +166,15 @@ class AudioDeviceNotifier extends StateNotifier<AudioDevicesState> {
 
       final id = bt.remoteId.str;
 
-      // Si es un headset (tiene mic), agregar como entrada Y salida
-      final hasMic = _isHeadset(name);
+      // Agregar como entrada (mic) y salida (parlante)
+      devices.add(AudioDevice(
+        id: '$id-in',
+        name: '$name 🎤',
+        isInput: true,
+        isOutput: false,
+        typeLabel: 'Bluetooth',
+        isConnected: true,
+      ));
       devices.add(AudioDevice(
         id: '$id-out',
         name: name,
@@ -154,34 +183,10 @@ class AudioDeviceNotifier extends StateNotifier<AudioDevicesState> {
         typeLabel: 'Bluetooth',
         isConnected: true,
       ));
-      if (hasMic) {
-        devices.add(AudioDevice(
-          id: '$id-in',
-          name: '$name 🎤',
-          isInput: true,
-          isOutput: false,
-          typeLabel: 'Bluetooth',
-          isConnected: true,
-        ));
-      }
     }
 
     // Limitar a 10 dispositivos máx
     state = state.copyWith(devices: devices.take(10).toList());
-  }
-
-  /// Heurística: ¿el nombre sugiere que es un headset con micrófono?
-  bool _isHeadset(String name) {
-    final lower = name.toLowerCase();
-    return lower.contains('headset') ||
-        lower.contains('headphone') ||
-        lower.contains('auricular') ||
-        lower.contains('manos libres') ||
-        lower.contains('handsfree') ||
-        lower.contains('airpods') ||
-        lower.contains('buds') ||
-        lower.contains('earphone') ||
-        lower.contains('earbud');
   }
 
   void _fallbackDevices() {
@@ -190,15 +195,13 @@ class AudioDeviceNotifier extends StateNotifier<AudioDevicesState> {
       const AudioDevice(id: 'builtin-speaker', name: 'Altavoz integrado', isInput: false, isOutput: true, typeLabel: 'Integrado', isConnected: true),
     ];
 
-    // Intentar agregar dispositivos BT aunque audio_session haya fallado
+    // Agregar todos los BT como entrada y salida
     for (final bt in _btDevices) {
       final name = bt.platformName.isNotEmpty ? bt.platformName : bt.remoteId.str;
       if (name.isEmpty) continue;
       final id = bt.remoteId.str;
+      devices.add(AudioDevice(id: '$id-in', name: '$name 🎤', isInput: true, isOutput: false, typeLabel: 'Bluetooth', isConnected: true));
       devices.add(AudioDevice(id: '$id-out', name: name, isInput: false, isOutput: true, typeLabel: 'Bluetooth', isConnected: true));
-      if (_isHeadset(name)) {
-        devices.add(AudioDevice(id: '$id-in', name: '$name 🎤', isInput: true, isOutput: false, typeLabel: 'Bluetooth', isConnected: true));
-      }
     }
 
     state = state.copyWith(devices: devices);

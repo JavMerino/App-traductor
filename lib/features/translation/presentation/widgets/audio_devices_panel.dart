@@ -1,4 +1,5 @@
 import 'package:audio_traductor/core/services/audio_device_manager.dart';
+import 'package:audio_traductor/core/services/bluetooth_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -13,12 +14,33 @@ class _AudioDevicesPanelState extends ConsumerState<AudioDevicesPanel> {
   @override
   Widget build(BuildContext context) {
     final ds = ref.watch(audioDevicesProvider);
+    final bt = ref.watch(bluetoothProvider);
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // ── Toggle Bluetooth ──
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          visualDensity: VisualDensity.compact,
+          title: Text('Bluetooth', style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w500)),
+          subtitle: Text(
+            bt.isAdapterOn ? 'Activado' : 'Desactivado',
+            style: TextStyle(fontSize: 12, color: bt.isAdapterOn ? Colors.green : colorScheme.onSurfaceVariant),
+          ),
+          value: bt.isAdapterOn,
+          onChanged: (v) {
+            if (v) ref.read(bluetoothProvider.notifier).toggleAdapter();
+          },
+          secondary: Icon(
+            Icons.bluetooth,
+            color: bt.isAdapterOn ? colorScheme.primary : colorScheme.onSurfaceVariant.withValues(alpha: 0.4),
+          ),
+        ),
+        const Divider(),
+
         // ── Entrada ──
         _sectionLabel('🎤 Entrada (micro)', theme),
         const SizedBox(height: 6),

@@ -1,6 +1,7 @@
 import 'package:audio_traductor/core/constants/app_constants.dart';
 import 'package:audio_traductor/core/services/audio_device_manager.dart';
 import 'package:audio_traductor/core/services/bluetooth_provider.dart';
+import 'package:audio_traductor/features/translation/domain/entities/language.dart';
 import 'package:audio_traductor/features/translation/domain/entities/translation_paragraph.dart';
 import 'package:audio_traductor/features/translation/domain/entities/translation_session.dart';
 import 'package:audio_traductor/features/translation/presentation/providers/translation_provider.dart';
@@ -29,24 +30,28 @@ class HomeScreen extends ConsumerWidget {
       appBar: AppBar(
         title: const Text(AppConstants.appName),
         actions: [
+          // ── Indicador Bluetooth minimalista ──
+          Padding(
+            padding: const EdgeInsets.only(right: 4),
+            child: Tooltip(
+              message: bt.isAdapterOn
+                  ? (bt.connectedDevice != null ? 'BT: ${bt.connectedDevice!.name}' : 'Bluetooth activado')
+                  : 'Bluetooth desactivado',
+              child: Icon(
+                Icons.bluetooth,
+                size: 20,
+                color: bt.isAdapterOn
+                    ? (bt.connectedDevice != null ? colorScheme.primary : colorScheme.onSurfaceVariant)
+                    : colorScheme.onSurfaceVariant.withValues(alpha: 0.25),
+              ),
+            ),
+          ),
           if (bt.connectedDevice != null)
-            Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: Tooltip(
-                message: 'BT: ${bt.connectedDevice!.name}',
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(width: 8, height: 8,
-                      decoration: BoxDecoration(
-                        color: Colors.greenAccent, shape: BoxShape.circle,
-                        boxShadow: [BoxShadow(color: Colors.greenAccent.withValues(alpha: 0.6), blurRadius: 4)],
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    Icon(Icons.bluetooth_connected, size: 18, color: colorScheme.primary),
-                  ],
-                ),
+            Container(width: 6, height: 6,
+              margin: const EdgeInsets.only(right: 8),
+              decoration: BoxDecoration(
+                color: Colors.greenAccent, shape: BoxShape.circle,
+                boxShadow: [BoxShadow(color: Colors.greenAccent.withValues(alpha: 0.6), blurRadius: 3)],
               ),
             ),
         ],
@@ -54,13 +59,13 @@ class HomeScreen extends ConsumerWidget {
       body: SafeArea(
         child: Column(
           children: [
-            // ── Selectores de idioma (bloqueados durante grabación) ──
+            // ── Selectores de idioma (bloqueados durante grabación o mic mode) ──
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               child: IgnorePointer(
-                ignoring: state.isStreaming,
+                ignoring: state.isStreaming || state.micMode,
                 child: AnimatedOpacity(
-                  opacity: state.isStreaming ? 0.4 : 1.0,
+                  opacity: (state.isStreaming || state.micMode) ? 0.4 : 1.0,
                   duration: const Duration(milliseconds: 200),
                   child: Row(
                     children: [
@@ -68,6 +73,7 @@ class HomeScreen extends ConsumerWidget {
                         label: 'Idioma de entrada',
                         selectedCode: settings.sourceLanguage,
                         selectedName: settings.sourceLanguageName,
+                        excludeCode: settings.targetLanguage,
                         onChanged: (l) => ref.read(audioSettingsProvider.notifier).setSourceLanguage(l.code, l.name),
                       )),
                       Padding(
@@ -78,6 +84,7 @@ class HomeScreen extends ConsumerWidget {
                         label: 'Idioma de salida',
                         selectedCode: settings.targetLanguage,
                         selectedName: settings.targetLanguageName,
+                        excludeCode: settings.sourceLanguage,
                         onChanged: (l) => ref.read(audioSettingsProvider.notifier).setTargetLanguage(l.code, l.name),
                       )),
                     ],
@@ -126,12 +133,17 @@ class HomeScreen extends ConsumerWidget {
             // ── Dispositivos de entrada/salida ──
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-              child: Row(
-                children: [
-                  // Entrada
-                  Expanded(
-                    child: InkWell(
-                      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen())),
+              child: IgnorePointer(
+                ignoring: state.isStreaming,
+                child: AnimatedOpacity(
+                  opacity: state.isStreaming ? 0.4 : 1.0,
+                  duration: const Duration(milliseconds: 200),
+                  child: Row(
+                    children: [
+                      // Entrada
+                      Expanded(
+                        child: InkWell(
+                          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen())),
                       borderRadius: BorderRadius.circular(12),
                       child: Container(
                         padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 10),
@@ -184,14 +196,43 @@ class HomeScreen extends ConsumerWidget {
                             ),
                           ],
                         ),
+                        ),
                       ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+
+            // ── Toggle micrófono (voz directa, sin traducción) ──
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              child: Row(
+                children: [
+                  Icon(Icons.mic, size: 18, color: state.micMode ? colorScheme.primary : colorScheme.onSurfaceVariant.withValues(alpha: 0.5)),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Micrófono (voz directa)',
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      color: state.micMode ? colorScheme.primary : colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const Spacer(),
+                  SizedBox(
+                    height: 28,
+                    child: Switch(
+                      value: state.micMode,
+                      onChanged: state.isStreaming
+                          ? null
+                          : (v) => ref.read(translationProvider.notifier).setMicMode(v),
                     ),
                   ),
                 ],
               ),
             ),
 
-            // ── Botón de grabación ──
+      // ── Botón de grabación ──
             Expanded(
               child: Column(
                 children: [
@@ -216,13 +257,15 @@ class HomeScreen extends ConsumerWidget {
                         ),
                         const SizedBox(height: 12),
                         Text(
-                          switch (state.status) {
-                            TranslationStatus.idle => 'Toca para empezar',
-                            TranslationStatus.listening => 'Escuchando...',
-                            TranslationStatus.translating => 'Traduciendo...',
-                            TranslationStatus.playing => 'Reproduciendo...',
-                            TranslationStatus.error => 'Error',
-                          },
+                          state.micMode && state.isStreaming
+                              ? 'Micrófono activo'
+                              : switch (state.status) {
+                                  TranslationStatus.idle => state.micMode ? 'Micrófono' : 'Toca para empezar',
+                                  TranslationStatus.listening => 'Escuchando...',
+                                  TranslationStatus.translating => 'Traduciendo...',
+                                  TranslationStatus.playing => 'Reproduciendo...',
+                                  TranslationStatus.error => 'Error',
+                                },
                           style: theme.textTheme.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant),
                         ),
                       ],

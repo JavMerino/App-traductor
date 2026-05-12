@@ -6,6 +6,7 @@ class LanguageSelector extends StatelessWidget {
   final String label;
   final String selectedCode;
   final String selectedName;
+  final String? excludeCode;
   final ValueChanged<Language> onChanged;
 
   const LanguageSelector({
@@ -13,6 +14,7 @@ class LanguageSelector extends StatelessWidget {
     required this.label,
     required this.selectedCode,
     required this.selectedName,
+    this.excludeCode,
     required this.onChanged,
   });
 
@@ -80,6 +82,7 @@ class LanguageSelector extends StatelessWidget {
       ),
       builder: (ctx) => _LanguagePickerSheet(
         selectedCode: selectedCode,
+        excludeCode: excludeCode,
         onChanged: onChanged,
       ),
     );
@@ -98,10 +101,12 @@ class LanguageSelector extends StatelessWidget {
 /// Sheet con la lista de idiomas.
 class _LanguagePickerSheet extends StatefulWidget {
   final String selectedCode;
+  final String? excludeCode;
   final ValueChanged<Language> onChanged;
 
   const _LanguagePickerSheet({
     required this.selectedCode,
+    this.excludeCode,
     required this.onChanged,
   });
 
@@ -116,21 +121,26 @@ class _LanguagePickerSheetState extends State<_LanguagePickerSheet> {
   @override
   void initState() {
     super.initState();
+    _filteredLanguages = widget.excludeCode != null
+        ? Language.supported.where((l) => l.code != widget.excludeCode).toList()
+        : Language.supported;
     _searchController.addListener(_filter);
   }
 
   void _filter() {
     final query = _searchController.text.toLowerCase();
+    var list = widget.excludeCode != null
+        ? Language.supported.where((l) => l.code != widget.excludeCode).toList()
+        : Language.supported;
+
     setState(() {
       _filteredLanguages = query.isEmpty
-          ? Language.supported
-          : Language.supported
-              .where(
-                (l) =>
-                    l.name.toLowerCase().contains(query) ||
-                    l.code.toLowerCase().contains(query),
-              )
-              .toList();
+          ? list
+          : list.where(
+              (l) =>
+                  l.name.toLowerCase().contains(query) ||
+                  l.code.toLowerCase().contains(query),
+            ).toList();
     });
   }
 

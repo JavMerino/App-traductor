@@ -47,7 +47,7 @@ class MainShell extends ConsumerStatefulWidget {
   ConsumerState<MainShell> createState() => _MainShellState();
 }
 
-class _MainShellState extends ConsumerState<MainShell> {
+class _MainShellState extends ConsumerState<MainShell> with WidgetsBindingObserver {
   int _currentIndex = 0;
 
   final _screens = const <Widget>[
@@ -55,6 +55,26 @@ class _MainShellState extends ConsumerState<MainShell> {
     HistoryScreen(),
     SettingsScreen(),
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
+      // Pausar traducción al salir de la app
+      ref.read(translationProvider.notifier).stopTranslation();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -80,6 +100,10 @@ class _MainShellState extends ConsumerState<MainShell> {
         bottomNavigationBar: NavigationBar(
           selectedIndex: _currentIndex,
           onDestinationSelected: (index) {
+            // Pausar traducción si se sale de la pestaña Traductor
+            if (_currentIndex == 0 && index != 0) {
+              ref.read(translationProvider.notifier).stopTranslation();
+            }
             setState(() => _currentIndex = index);
             // Refrescar historial cada vez que se entra a la pestaña
             if (index == 1) {

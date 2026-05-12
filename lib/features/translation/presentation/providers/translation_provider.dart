@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:audio_traductor/core/di/injection_container.dart';
+import 'package:audio_traductor/core/services/mic_passthrough_service.dart';
 import 'package:audio_traductor/features/translation/data/datasources/google_tts_datasource.dart';
 import 'package:audio_traductor/features/translation/domain/entities/translation_paragraph.dart';
 import 'package:audio_traductor/features/translation/domain/entities/translation_session.dart';
@@ -15,6 +16,7 @@ class TranslationState {
   final String? playingParagraphId;
   final String? currentSessionId;
   final String sessionName;
+  final bool micMode;
 
   const TranslationState({
     this.status = TranslationStatus.idle,
@@ -24,6 +26,7 @@ class TranslationState {
     this.playingParagraphId,
     this.currentSessionId,
     this.sessionName = '',
+    this.micMode = false,
   });
 
   TranslationState copyWith({
@@ -34,6 +37,7 @@ class TranslationState {
     String? playingParagraphId,
     String? currentSessionId,
     String? sessionName,
+    bool? micMode,
   }) {
     return TranslationState(
       status: status ?? this.status,
@@ -43,6 +47,7 @@ class TranslationState {
       playingParagraphId: playingParagraphId,
       currentSessionId: currentSessionId,
       sessionName: sessionName ?? this.sessionName,
+      micMode: micMode ?? this.micMode,
     );
   }
 }
@@ -55,11 +60,17 @@ class TranslationNotifier extends StateNotifier<TranslationState> {
   String _currentTargetLanguage = 'en';
   String _currentVoiceName = '';
   double _currentSpeed = 0.5;
+  final MicPassthroughService _passthrough = MicPassthroughService();
 
   @override
   void dispose() {
     _subscription?.cancel();
+    _passthrough.dispose();
     super.dispose();
+  }
+
+  void setMicMode(bool v) {
+    state = state.copyWith(micMode: v);
   }
 
   Future<void> startTranslation({
@@ -76,6 +87,18 @@ class TranslationNotifier extends StateNotifier<TranslationState> {
     _currentTargetLanguage = targetLanguage;
     _currentVoiceName = voiceName;
     _currentSpeed = speed;
+
+    // Modo micrófono: passthrough directo (sin traducción)
+    if (state.micMode) {
+      state = state.copyWith(
+        status: TranslationStatus.listening,
+        isStreaming: true,
+        errorMessage: null,
+      );
+      await _passthrough.start();
+      return;
+    }
+
     state = state.copyWith(
       status: TranslationStatus.listening,
       isStreaming: true,
@@ -156,6 +179,16 @@ class TranslationNotifier extends StateNotifier<TranslationState> {
   }
 
   Future<void> stopTranslation() async {
+    // Detener cualquier audio en curso (TTS o passthrough)
+    RealTtsDatasource.instance.stop();
+
+    // Si está en modo micrófono, solo detener passthrough
+    if (state.micMode) {
+      await _passthrough.stop();
+      state = state.copyWith(status: TranslationStatus.idle, isStreaming: false);
+      return;
+    }
+
     await _subscription?.cancel();
     _subscription = null;
     final result = await InjectionContainer.stopTranslation();
