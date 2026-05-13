@@ -1,5 +1,9 @@
 import 'dart:async';
+import 'dart:convert';
+import 'package:audio_traductor/core/constants/api_constants.dart';
 import 'package:audio_traductor/core/errors/exceptions.dart';
+import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
 import 'package:speech_to_text/speech_recognition_result.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 
@@ -148,9 +152,22 @@ class MockSttDatasource implements SttDatasource {
   Future<void> stop() async {}
 }
 
-/// Implementación con Google Cloud Speech-to-Text API (futura).
+/// Implementación con Google Cloud Speech-to-Text API.
+///
+/// Captura audio desde el micrófono nativo de Android (NO BT)
+/// mediante [EventChannel] que recibe PCM del AudioRecord nativo
+/// configurado con VOICE_RECOGNITION + setPreferredDevice.
+/// Cada ~3 segundos envía el audio a Google STT API.
 class GoogleSttDatasource implements SttDatasource {
+  static const _audioChannel = MethodChannel('com.audiotraductor/audio');
+  static const _micChannel = EventChannel('com.audiotraductor/mic');
+
   final String _apiKey;
+  StreamSubscription? _micSub;
+  StreamController<SttResult>? _controller;
+  bool _stopping = false;
+  String _languageCode = 'es';
+  final List<int> _buffer = [];
 
   GoogleSttDatasource(this._apiKey);
 
@@ -159,12 +176,106 @@ class GoogleSttDatasource implements SttDatasource {
     required Stream<List<int>> audioStream,
     required String languageCode,
   }) async* {
-    throw const ServerException(
-      message: 'Google STT no está configurado. '
-          'Usá RealSttDatasource para desarrollo.',
+    _controller = StreamController<SttResult>.broadcast();
+    _stopping = false;
+    _languageCode = languageCode;
+    _buffer.clear();
+
+    // Iniciar captura nativa (VOICE_RECOGNITION + built-in mic)
+    await _audioChannel.invokeMethod('startRecording');
+
+    // Escuchar el stream de audio nativo
+    _micSub = _micChannel.receiveBroadcastStream().listen(
+      (data) {
+        if (_stopping) return;
+        if (data is! List<int>) return;
+        _onAudioData(data);
+      },
+      onError: (e) => _controller?.addError('Error de micrófono: $e'),
     );
+
+    yield* _controller!.stream;
+  }
+
+  void _onAudioData(List<int> chunk) {
+    if (_stopping) return;
+    _buffer.addAll(chunk);
+
+    // ~3 segundos de audio a 16kHz mono 16-bit = 96000 bytes
+    if (_buffer.length >= 96000) {
+      _recognizeBatch();
+    }
+  }
+
+  Future<void> _recognizeBatch() async {
+    if (_buffer.isEmpty || _stopping) return;
+    final pcmData = List<int>.from(_buffer);
+    _buffer.clear();
+
+    try {
+      final base64Audio = base64Encode(pcmData);
+      final uri = Uri.parse(ApiConstants.sttEndpoint).replace(
+        queryParameters: {'key': _apiKey},
+      );
+
+      final response = await http.post(
+        uri,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'config': {
+            'encoding': 'LINEAR16',
+            'sampleRateHertz': 16000,
+            'languageCode': _mapLanguage(_languageCode),
+            'model': 'default',
+          },
+          'audio': {
+            'content': base64Audio,
+          },
+        }),
+      );
+
+      if (response.statusCode != 200 || _stopping) return;
+
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final results = data['results'] as List?;
+      if (results == null || results.isEmpty) return;
+
+      final result = results.last as Map<String, dynamic>;
+      final alternatives = result['alternatives'] as List?;
+      if (alternatives == null || alternatives.isEmpty) return;
+
+      final transcript = (alternatives.first as Map)['transcript'] as String?;
+      if (transcript == null || transcript.isEmpty) return;
+
+      final confidence =
+          ((alternatives.first as Map)['confidence'] as num?)?.toDouble() ?? 1.0;
+
+      _controller?.add(SttResult(
+        transcript: transcript,
+        isFinal: result['isFinal'] as bool? ?? true,
+        confidence: confidence,
+      ));
+    } catch (_) {}
   }
 
   @override
-  Future<void> stop() async {}
+  Future<void> stop() async {
+    _stopping = true;
+    await _micSub?.cancel();
+    _micSub = null;
+    await _audioChannel.invokeMethod('stopRecording');
+    await _controller?.close();
+    _controller = null;
+    _buffer.clear();
+  }
+
+  String _mapLanguage(String code) {
+    const map = {
+      'es': 'es-ES', 'en': 'en-US', 'pt': 'pt-BR',
+      'fr': 'fr-FR', 'de': 'de-DE', 'it': 'it-IT',
+      'ja': 'ja-JP', 'zh': 'zh-CN', 'ko': 'ko-KR',
+      'ru': 'ru-RU', 'ar': 'ar-SA', 'nl': 'nl-NL',
+    };
+    return map[code] ?? 'en-US';
+  }
 }

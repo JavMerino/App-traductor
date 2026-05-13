@@ -1,3 +1,4 @@
+import 'package:audio_traductor/core/constants/api_constants.dart';
 import 'package:audio_traductor/features/translation/data/datasources/google_stt_datasource.dart';
 import 'package:audio_traductor/features/translation/data/datasources/google_translate_datasource.dart';
 import 'package:audio_traductor/features/translation/data/datasources/google_tts_datasource.dart';
@@ -10,7 +11,7 @@ import 'package:audio_traductor/features/translation/domain/usecases/stop_stream
 
 class InjectionContainer {
   // ── DataSources ──
-  static final SttDatasource _stt = RealSttDatasource();
+  static final SttDatasource _stt = GoogleSttDatasource(ApiConstants.sttApiKey);
   static final TranslateDatasource _translate = GoogleTranslateDatasource();
   static final TtsDatasource _tts = RealTtsDatasource.instance;
   static final _local = TranslationLocalDatasource();
