@@ -77,8 +77,28 @@ class HomeScreen extends ConsumerWidget {
                         onChanged: (l) => ref.read(audioSettingsProvider.notifier).setSourceLanguage(l.code, l.name),
                       )),
                       Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                        child: Icon(Icons.arrow_forward, color: colorScheme.primary),
+                        padding: const EdgeInsets.symmetric(horizontal: 2),
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(8),
+                          onTap: (state.isStreaming || state.micMode) ? null : () {
+                            final srcCode = settings.sourceLanguage;
+                            final srcName = settings.sourceLanguageName;
+                            final tgtCode = settings.targetLanguage;
+                            final tgtName = settings.targetLanguageName;
+                            ref.read(audioSettingsProvider.notifier).setSourceLanguage(tgtCode, tgtName);
+                            ref.read(audioSettingsProvider.notifier).setTargetLanguage(srcCode, srcName);
+                          },
+                          child: Padding(
+                            padding: const EdgeInsets.all(6),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.arrow_back, size: 14, color: colorScheme.primary),
+                                Icon(Icons.arrow_forward, size: 14, color: colorScheme.primary),
+                              ],
+                            ),
+                          ),
+                        ),
                       ),
                       Expanded(child: LanguageSelector(
                         label: 'Idioma de salida',
