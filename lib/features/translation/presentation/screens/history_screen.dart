@@ -368,6 +368,7 @@ class Bubble extends StatelessWidget {
   final bool isRight;
 
   const Bubble({
+    super.key,
     required this.text,
     required this.flag,
     required this.color,

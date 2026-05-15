@@ -1,7 +1,6 @@
 import 'package:audio_traductor/core/constants/app_constants.dart';
 import 'package:audio_traductor/core/services/audio_device_manager.dart';
 import 'package:audio_traductor/core/services/bluetooth_provider.dart';
-import 'package:audio_traductor/features/translation/domain/entities/language.dart';
 import 'package:audio_traductor/features/translation/domain/entities/translation_paragraph.dart';
 import 'package:audio_traductor/features/translation/domain/entities/translation_session.dart';
 import 'package:audio_traductor/features/translation/presentation/providers/translation_provider.dart';

@@ -42,6 +42,22 @@ class RealTtsDatasource implements TtsDatasource {
 
   RealTtsDatasource._() : _tts = FlutterTts();
 
+  /// Pre-calienta el motor TTS para un idioma (reduce latencia del primer síntesis).
+  Future<void> warmup(String languageCode, String voiceName) async {
+    try {
+      await _tts.setLanguage(_mapLanguage(languageCode));
+      if (voiceName.isNotEmpty) {
+        await _selectVoice(voiceName, languageCode);
+      }
+      // Decir algo corto para cargar la voz (silencioso)
+      await _tts.setVolume(0);
+      await _tts.speak('');
+      await Future.delayed(const Duration(milliseconds: 200));
+      await _tts.setVolume(1);
+      await _tts.stop();
+    } catch (_) {}
+  }
+
   /// Detiene la reproducción TTS en curso.
   Future<void> stop() async {
     try {

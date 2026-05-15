@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:audio_traductor/core/constants/api_constants.dart';
-import 'package:audio_traductor/core/errors/exceptions.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:speech_to_text/speech_recognition_result.dart';
@@ -153,21 +153,22 @@ class MockSttDatasource implements SttDatasource {
 }
 
 /// Implementación con Google Cloud Speech-to-Text API.
-///
-/// Captura audio desde el micrófono nativo de Android (NO BT)
-/// mediante [EventChannel] que recibe PCM del AudioRecord nativo
-/// configurado con VOICE_RECOGNITION + setPreferredDevice.
-/// Cada ~3 segundos envía el audio a Google STT API.
+/// Captura audio con [record] package y detecta pausas para enviar párrafos.
 class GoogleSttDatasource implements SttDatasource {
+  static const _silenceThresholdMs = 500;
+  static const _rmsThreshold = 1000;
   static const _audioChannel = MethodChannel('com.audiotraductor/audio');
   static const _micChannel = EventChannel('com.audiotraductor/mic');
 
   final String _apiKey;
-  StreamSubscription? _micSub;
+  final http.Client _http = http.Client(); // persistente para reusar conexión
+  StreamSubscription<List<int>>? _micSub;
   StreamController<SttResult>? _controller;
   bool _stopping = false;
   String _languageCode = 'es';
   final List<int> _buffer = [];
+  int _silenceSamples = 0;
+  bool _hadSpeech = false;
 
   GoogleSttDatasource(this._apiKey);
 
@@ -180,19 +181,33 @@ class GoogleSttDatasource implements SttDatasource {
     _stopping = false;
     _languageCode = languageCode;
     _buffer.clear();
+    _silenceSamples = 0;
+    _hadSpeech = false;
 
-    // Iniciar captura nativa (VOICE_RECOGNITION + built-in mic)
-    await _audioChannel.invokeMethod('startRecording');
+    try {
+      // 1. Forzar mic del celular (también guarda comm device antes de limpiar)
+      await _audioChannel.invokeMethod('forceBuiltinMic');
+      // 2. Esperar que SCO se desconecte
+      await Future.delayed(const Duration(milliseconds: 150));
 
-    // Escuchar el stream de audio nativo
-    _micSub = _micChannel.receiveBroadcastStream().listen(
-      (data) {
-        if (_stopping) return;
-        if (data is! List<int>) return;
-        _onAudioData(data);
-      },
-      onError: (e) => _controller?.addError('Error de micrófono: $e'),
-    );
+      // 3. Iniciar grabación nativa — mic del celular (sin comm device)
+      await _audioChannel.invokeMethod('startRecording');
+      final stream = _micChannel.receiveBroadcastStream().map<List<int>>((event) {
+        if (event is Uint8List) return event;
+        if (event is List<int>) return event;
+        if (event is List) return List<int>.from(event);
+        return const <int>[];
+      });
+
+      // 4. Restaurar dispositivo de salida una vez que el recorder ya arrancó
+      _micSub = stream.listen(
+        _onAudioData,
+        onError: (e) => _controller?.addError('Mic: $e'),
+      );
+      _audioChannel.invokeMethod('restoreOutput');
+    } catch (e) {
+      _controller?.addError('Error al iniciar mic: $e');
+    }
 
     yield* _controller!.stream;
   }
@@ -201,16 +216,43 @@ class GoogleSttDatasource implements SttDatasource {
     if (_stopping) return;
     _buffer.addAll(chunk);
 
-    // ~3 segundos de audio a 16kHz mono 16-bit = 96000 bytes
-    if (_buffer.length >= 96000) {
+    // Media de valores absolutos: más robusta que pico para detectar silencio
+    final mav = _calcMav(chunk);
+    final isSpeech = mav > _rmsThreshold;
+    final samplesInChunk = chunk.length ~/ 2;
+
+    if (isSpeech) {
+      _silenceSamples = 0;
+      _hadSpeech = true;
+    } else if (_hadSpeech) {
+      _silenceSamples += samplesInChunk;
+    }
+
+    // ¿500ms de silencio después de hablar?
+    final silenceMs = _silenceSamples * 1000 ~/ 16000;
+    if (_hadSpeech && silenceMs >= _silenceThresholdMs) {
       _recognizeBatch();
     }
+  }
+
+  /// Media de valores absolutos para PCM 16-bit mono.
+  double _calcMav(List<int> bytes) {
+    var sum = 0;
+    for (var i = 0; i < bytes.length - 1; i += 2) {
+      final unsigned = ((bytes[i + 1] & 0xFF) << 8) | (bytes[i] & 0xFF);
+      final sample = unsigned > 32767 ? unsigned - 65536 : unsigned;
+      sum += sample.abs();
+    }
+    final count = bytes.length ~/ 2;
+    return count > 0 ? sum / count : 0.0;
   }
 
   Future<void> _recognizeBatch() async {
     if (_buffer.isEmpty || _stopping) return;
     final pcmData = List<int>.from(_buffer);
     _buffer.clear();
+    _hadSpeech = false;
+    _silenceSamples = 0;
 
     try {
       final base64Audio = base64Encode(pcmData);
@@ -218,7 +260,7 @@ class GoogleSttDatasource implements SttDatasource {
         queryParameters: {'key': _apiKey},
       );
 
-      final response = await http.post(
+      final response = await _http.post(
         uri,
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
@@ -226,15 +268,19 @@ class GoogleSttDatasource implements SttDatasource {
             'encoding': 'LINEAR16',
             'sampleRateHertz': 16000,
             'languageCode': _mapLanguage(_languageCode),
-            'model': 'default',
+            'model': 'command_and_search',
+            'enableAutomaticPunctuation': true,
           },
-          'audio': {
-            'content': base64Audio,
-          },
+          'audio': {'content': base64Audio},
         }),
       );
 
-      if (response.statusCode != 200 || _stopping) return;
+      if (response.statusCode != 200 || _stopping) {
+        if (response.statusCode != 200) {
+          _controller?.addError('STT API error ${response.statusCode}: ${response.body}');
+        }
+        return;
+      }
 
       final data = jsonDecode(response.body) as Map<String, dynamic>;
       final results = data['results'] as List?;
@@ -255,7 +301,9 @@ class GoogleSttDatasource implements SttDatasource {
         isFinal: result['isFinal'] as bool? ?? true,
         confidence: confidence,
       ));
-    } catch (_) {}
+    } catch (e) {
+      _controller?.addError('STT error: $e');
+    }
   }
 
   @override
@@ -263,7 +311,9 @@ class GoogleSttDatasource implements SttDatasource {
     _stopping = true;
     await _micSub?.cancel();
     _micSub = null;
-    await _audioChannel.invokeMethod('stopRecording');
+    try {
+      await _audioChannel.invokeMethod('stopRecording');
+    } catch (_) {}
     await _controller?.close();
     _controller = null;
     _buffer.clear();

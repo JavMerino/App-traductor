@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'package:audio_traductor/core/services/audio_device_manager.dart';
 import 'package:audio_traductor/core/services/bluetooth_provider.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_blue_plus/flutter_blue_plus.dart' as fbp;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 class AudioDevicesPanel extends ConsumerStatefulWidget {
@@ -11,6 +13,37 @@ class AudioDevicesPanel extends ConsumerStatefulWidget {
 }
 
 class _AudioDevicesPanelState extends ConsumerState<AudioDevicesPanel> {
+  final Set<String> _connectingBT = {};
+  StreamSubscription<List<fbp.ScanResult>>? _scanSub;
+  List<fbp.ScanResult> _scanResults = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _scanSub = fbp.FlutterBluePlus.scanResults.listen((r) {
+      setState(() => _scanResults = r);
+    });
+  }
+
+  @override
+  void dispose() {
+    _scanSub?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _connectDevice(fbp.ScanResult r) async {
+    final id = r.device.remoteId.str;
+    setState(() => _connectingBT.add(id));
+    try {
+      await r.device.connect();
+      await Future.delayed(const Duration(seconds: 1));
+      // Refrescar lista de dispositivos
+      ref.read(audioDevicesProvider.notifier).refreshDevices();
+      setState(() {});
+    } catch (_) {}
+    setState(() => _connectingBT.remove(id));
+  }
+
   @override
   Widget build(BuildContext context) {
     final ds = ref.watch(audioDevicesProvider);
@@ -69,6 +102,44 @@ class _AudioDevicesPanelState extends ConsumerState<AudioDevicesPanel> {
 
         const SizedBox(height: 14),
 
+        // ── Escanear BT ──
+        FilledButton.tonalIcon(
+          onPressed: () {
+            fbp.FlutterBluePlus.startScan(timeout: const Duration(seconds: 10));
+            setState(() {});
+          },
+          icon: const Icon(Icons.bluetooth_searching, size: 18),
+          label: const Text('Escanear dispositivos'),
+        ),
+
+        // ── Resultados del scan ──
+        if (_scanResults.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          ..._scanResults.map((r) {
+            final id = r.device.remoteId.str;
+            final name = r.device.platformName.isNotEmpty
+                ? r.device.platformName
+                : r.advertisementData.advName.isNotEmpty
+                    ? r.advertisementData.advName
+                    : id;
+            final isConnecting = _connectingBT.contains(id);
+
+            return ListTile(
+              dense: true,
+              leading: Icon(Icons.bluetooth, size: 20, color: colorScheme.primary),
+              title: Text(name, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13)),
+              trailing: isConnecting
+                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                  : TextButton(
+                      onPressed: () => _connectDevice(r),
+                      child: const Text('Conectar', style: TextStyle(fontSize: 11)),
+                    ),
+            );
+          }),
+        ],
+
+        const SizedBox(height: 8),
+
         // ── Info ──
         Container(
           padding: const EdgeInsets.all(10),
@@ -77,7 +148,7 @@ class _AudioDevicesPanelState extends ConsumerState<AudioDevicesPanel> {
             borderRadius: BorderRadius.circular(8),
           ),
           child: Text(
-            'Android rutea el audio automáticamente. Conectá los dispositivos BT desde los ajustes del sistema y seleccionalos arriba.',
+            'Escaneá y conectá dispositivos BT. Al conectar uno, seleccionalo como salida.',
             style: TextStyle(fontSize: 11, color: colorScheme.onSurfaceVariant),
           ),
         ),

@@ -1,6 +1,6 @@
 import 'dart:async';
+import 'dart:typed_data';
 import 'package:flutter/services.dart';
-import 'package:record/record.dart';
 
 /// Servicio de passthrough: captura el micrófono y lo reproduce
 /// por el altavoz en tiempo real usando AudioTrack nativo de Android.
@@ -8,8 +8,9 @@ import 'package:record/record.dart';
 /// Latencia ~100ms. Sin archivos, sin just_audio.
 class MicPassthroughService {
   static const _channel = MethodChannel('com.audiotraductor/passthrough');
+  static const _audioChannel = MethodChannel('com.audiotraductor/audio');
+  static const _micChannel = EventChannel('com.audiotraductor/mic');
 
-  final _recorder = AudioRecorder();
   StreamSubscription<List<int>>? _micSub;
   bool _running = false;
 
@@ -20,16 +21,21 @@ class MicPassthroughService {
     if (_running) return;
     _running = true;
 
-    await _channel.invokeMethod('start');
+    try {
+      await _audioChannel.invokeMethod('startRecording');
+      await _channel.invokeMethod('start');
+    } catch (_) {
+      _running = false;
+      return;
+    }
 
     try {
-      final stream = await _recorder.startStream(
-        const RecordConfig(
-          encoder: AudioEncoder.pcm16bits,
-          numChannels: 1,
-          sampleRate: 16000,
-        ),
-      );
+      final stream = _micChannel.receiveBroadcastStream().map<List<int>>((event) {
+        if (event is Uint8List) return event;
+        if (event is List<int>) return event;
+        if (event is List) return List<int>.from(event);
+        return const <int>[];
+      });
 
       _micSub = stream.listen(
         (chunk) {
@@ -51,13 +57,12 @@ class MicPassthroughService {
     await _micSub?.cancel();
     _micSub = null;
     try {
-      await _recorder.stop();
+      await _audioChannel.invokeMethod('stopRecording');
     } catch (_) {}
     await _channel.invokeMethod('stop');
   }
 
   void dispose() {
     stop();
-    _recorder.dispose();
   }
 }

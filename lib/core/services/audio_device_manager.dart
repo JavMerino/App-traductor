@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:audio_session/audio_session.dart' as a;
+import 'package:flutter/services.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart' as fbp;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -25,12 +26,14 @@ class AudioDevicesState {
   final List<AudioDevice> devices;
   final String? selectedInputId;
   final String? selectedOutputId;
+  final bool hasManualOutputSelection;
   final bool isScanning;
 
   const AudioDevicesState({
     this.devices = const [],
     this.selectedInputId = 'builtin-mic',
     this.selectedOutputId = 'builtin-speaker',
+    this.hasManualOutputSelection = false,
     this.isScanning = false,
   });
 
@@ -38,12 +41,15 @@ class AudioDevicesState {
     List<AudioDevice>? devices,
     String? selectedInputId,
     String? selectedOutputId,
+    bool? hasManualOutputSelection,
     bool? isScanning,
   }) {
     return AudioDevicesState(
       devices: devices ?? this.devices,
       selectedInputId: selectedInputId ?? this.selectedInputId,
       selectedOutputId: selectedOutputId ?? this.selectedOutputId,
+      hasManualOutputSelection:
+          hasManualOutputSelection ?? this.hasManualOutputSelection,
       isScanning: isScanning ?? this.isScanning,
     );
   }
@@ -53,7 +59,7 @@ class AudioDeviceNotifier extends StateNotifier<AudioDevicesState> {
   a.AudioSession? _session;
   StreamSubscription<Set<a.AudioDevice>>? _deviceSub;
   StreamSubscription<bool>? _btScanSub;
-  List<fbp.BluetoothDevice> _btDevices = [];
+  List<Map<String, dynamic>> _bondedDevices = [];
 
   AudioDeviceNotifier() : super(const AudioDevicesState()) {
     _init();
@@ -84,6 +90,7 @@ class AudioDeviceNotifier extends StateNotifier<AudioDevicesState> {
         androidAudioFocusGainType: a.AndroidAudioFocusGainType.gain,
       ));
       await _session?.setActive(true);
+      await _forceBuiltinMic();
     } catch (_) {}
   }
 
@@ -96,21 +103,31 @@ class AudioDeviceNotifier extends StateNotifier<AudioDevicesState> {
     }
   }
 
-  /// Carga dispositivos BT ya conectados vía flutter_blue_plus.
-  /// audio_session no siempre detecta headsets Bluetooth en todos los Android.
+  /// Carga dispositivos BT vinculados + conectados (independiente).
   Future<void> _loadConnectedBT() async {
+    // Primero cargar vinculados (no depende de flutter_blue_plus)
+    _bondedDevices = await _getBondedDevices();
+
+    final set = await _session?.getDevices() ?? {};
+    _updateFromSet(set);
+  }
+
+  /// Obtiene dispositivos BT vinculados (clásico + BLE).
+  Future<List<Map<String, dynamic>>> _getBondedDevices() async {
     try {
-      _btDevices = await fbp.FlutterBluePlus.connectedDevices;
-      // Reconstruir lista combinando audio_session + BT
-      final set = await _session?.getDevices() ?? {};
-      _updateFromSet(set);
+      const channel = MethodChannel('com.audiotraductor/audio');
+      final result = await channel.invokeMethod('getBondedDevices');
+      if (result is List) return List<Map<String, dynamic>>.from(
+        result.map((e) => Map<String, dynamic>.from(e as Map)),
+      );
     } catch (_) {}
+    return [];
   }
 
   void _listenChanges() {
     // Pequeño delay para evitar doble carga con _loadInitial
     Future.delayed(const Duration(milliseconds: 300), () {
-      _deviceSub = _session?.devicesStream.listen((set) => _updateFromSet(set));
+      _deviceSub = _session?.devicesStream.listen((_) => _loadConnectedBT());
     });
   }
 
@@ -121,97 +138,184 @@ class AudioDeviceNotifier extends StateNotifier<AudioDevicesState> {
   }
 
   void selectInput(String id) {
-    state = state.copyWith(selectedInputId: id);
+    state = state.copyWith(selectedInputId: 'builtin-mic');
     _configureSession();
   }
 
   void selectOutput(String id) {
-    state = state.copyWith(selectedOutputId: id);
-    _configureSession();
+    state = state.copyWith(
+      selectedOutputId: id,
+      hasManualOutputSelection: true,
+    );
+    _routeOutputById(id);
+  }
+
+  /// Rutea el audio al dispositivo seleccionado vía nativo.
+  Future<void> _routeOutput({required String deviceName, required String deviceId}) async {
+    try {
+      final device = state.devices.where((d) => d.id == deviceId).firstOrNull;
+      const channel = MethodChannel('com.audiotraductor/audio');
+      await channel.invokeMethod('selectOutput', {
+        'name': deviceName,
+        'id': deviceId,
+        'type': device?.typeLabel ?? '',
+      });
+      await _forceBuiltinMic();
+    } catch (_) {}
+  }
+
+  Future<void> _forceBuiltinMic() async {
+    try {
+      const channel = MethodChannel('com.audiotraductor/audio');
+      await channel.invokeMethod('forceBuiltinMic');
+    } catch (_) {}
+  }
+
+  /// Refresca la lista de dispositivos (llamar después de conectar BT).
+  Future<void> refreshDevices() async {
+    await _loadConnectedBT();
   }
 
   void _updateFromSet(Set<a.AudioDevice> set) {
     final devices = <AudioDevice>[];
-    final seen = <String>{'builtin-mic', 'builtin-speaker', 'micrófono integrado', 'altavoz integrado'};
+    final seen = <String>{'builtin-mic', 'micrófono integrado'};
 
-    // Siempre los integrados
+    // Siempre el micrófono integrado
     devices.add(const AudioDevice(id: 'builtin-mic', name: 'Micrófono integrado', isInput: true, isOutput: false, typeLabel: 'Integrado', isConnected: true));
-    devices.add(const AudioDevice(id: 'builtin-speaker', name: 'Altavoz integrado', isInput: false, isOutput: true, typeLabel: 'Integrado', isConnected: true));
 
     for (final d in set) {
       final typeStr = d.type.name;
-      if (typeStr == 'builtInSpeaker' || typeStr == 'builtInEarpiece') continue;
+      if (typeStr == 'builtInEarpiece') continue;
 
       final name = _cleanName(d.name);
       if (name.isEmpty) continue;
-      if (seen.any((s) => name.toLowerCase().contains(s.toLowerCase()) || s.contains(name.toLowerCase()))) continue;
+      if (seen.contains(name.toLowerCase())) continue;
       seen.add(name.toLowerCase());
 
       devices.add(AudioDevice(
         id: d.id,
         name: name,
-        isInput: d.isInput,
+        isInput: false,
         isOutput: d.isOutput,
         typeLabel: _labelFor(typeStr),
         isConnected: true,
       ));
     }
 
-    // Agregar dispositivos BT ya conectados que audio_session no detectó
-    for (final bt in _btDevices) {
-      final name = bt.platformName.isNotEmpty ? bt.platformName : bt.remoteId.str;
-      if (name.isEmpty) continue;
-      if (seen.any((s) => name.toLowerCase().contains(s.toLowerCase()) || s.contains(name.toLowerCase()))) continue;
-      seen.add(name.toLowerCase());
+    // Agregar dispositivos BT vinculados no detectados
+    for (final b in _bondedDevices) {
+      final addr = b['address'] as String? ?? '';
+      final rawName = b['name'] as String? ?? '';
+      final isConnected = b['connected'] as bool? ?? false;
+      final name = rawName.isNotEmpty ? rawName : addr;
+      if (addr.isEmpty) continue;
+      if (seen.contains(addr.toLowerCase())) continue;
+      seen.add(addr.toLowerCase());
 
-      final id = bt.remoteId.str;
-
-      // Agregar como entrada (mic) y salida (parlante)
       devices.add(AudioDevice(
-        id: '$id-in',
-        name: '$name 🎤',
-        isInput: true,
-        isOutput: false,
-        typeLabel: 'Bluetooth',
-        isConnected: true,
-      ));
-      devices.add(AudioDevice(
-        id: '$id-out',
+        id: 'bt-bonded-$addr-out',
         name: name,
         isInput: false,
         isOutput: true,
         typeLabel: 'Bluetooth',
-        isConnected: true,
+        isConnected: isConnected,
       ));
     }
 
-    // Limitar a 10 dispositivos máx
-    state = state.copyWith(devices: devices.take(10).toList());
+    // Limitar a 15 dispositivos máx
+    final list = devices.take(15).toList();
+    final previousSelection = state.selectedOutputId;
+    final keepManualSelection = state.hasManualOutputSelection &&
+        list.any((d) => d.isOutput && d.id == previousSelection);
+
+    final inferredOutput = _resolvePreferredOutputId(list);
+    final nextOutputId = keepManualSelection
+        ? previousSelection
+        : inferredOutput;
+
+    state = state.copyWith(
+      devices: list,
+      selectedInputId: 'builtin-mic',
+      selectedOutputId: nextOutputId,
+      hasManualOutputSelection: keepManualSelection,
+    );
+
+    if (nextOutputId != null) {
+      _routeOutputById(nextOutputId);
+    }
   }
 
   void _fallbackDevices() {
     final devices = <AudioDevice>[
       const AudioDevice(id: 'builtin-mic', name: 'Micrófono integrado', isInput: true, isOutput: false, typeLabel: 'Integrado', isConnected: true),
-      const AudioDevice(id: 'builtin-speaker', name: 'Altavoz integrado', isInput: false, isOutput: true, typeLabel: 'Integrado', isConnected: true),
     ];
 
-    // Agregar todos los BT como entrada y salida
-    for (final bt in _btDevices) {
-      final name = bt.platformName.isNotEmpty ? bt.platformName : bt.remoteId.str;
-      if (name.isEmpty) continue;
-      final id = bt.remoteId.str;
-      devices.add(AudioDevice(id: '$id-in', name: '$name 🎤', isInput: true, isOutput: false, typeLabel: 'Bluetooth', isConnected: true));
-      devices.add(AudioDevice(id: '$id-out', name: name, isInput: false, isOutput: true, typeLabel: 'Bluetooth', isConnected: true));
+    for (final b in _bondedDevices) {
+      final addr = b['address'] as String? ?? '';
+      final rawName = b['name'] as String? ?? '';
+      final isConnected = b['connected'] as bool? ?? false;
+      final name = rawName.isNotEmpty ? rawName : addr;
+      if (addr.isEmpty) continue;
+      devices.add(AudioDevice(
+        id: 'bt-bonded-$addr-out',
+        name: name,
+        isInput: false,
+        isOutput: true,
+        typeLabel: 'Bluetooth',
+        isConnected: isConnected,
+      ));
     }
 
-    state = state.copyWith(devices: devices);
+    final btOutput = devices.cast<AudioDevice?>().firstWhere(
+      (d) => d!.isOutput && d.typeLabel == 'Bluetooth',
+      orElse: () => null,
+    );
+    state = state.copyWith(
+      devices: devices,
+      selectedInputId: 'builtin-mic',
+      selectedOutputId: btOutput?.id ?? 'builtin-speaker',
+      hasManualOutputSelection: false,
+    );
+
+    if (state.selectedOutputId != null) {
+      _routeOutputById(state.selectedOutputId!);
+    }
   }
 
-  String _labelFor(String type) => switch (type) {
-    'wiredHeadset' || 'wiredHeadphones' => 'Cable',
-    'bluetooth' || 'bluetoothA2DP' || 'bluetoothLE' || 'bluetoothSCOHeadset' || 'bluetoothHeadset' => 'Bluetooth',
-    _ => 'Externo',
-  };
+  Future<void> _routeOutputById(String id) async {
+    final device = state.devices.where((d) => d.id == id).firstOrNull;
+    final name = device?.name ?? '';
+    await _routeOutput(deviceName: name, deviceId: id);
+  }
+
+  String _resolvePreferredOutputId(List<AudioDevice> devices) {
+    final connectedBluetoothOutput = devices.cast<AudioDevice?>().firstWhere(
+      (d) => d!.isOutput && d.isConnected && d.typeLabel == 'Bluetooth',
+      orElse: () => null,
+    );
+    if (connectedBluetoothOutput != null) return connectedBluetoothOutput.id;
+
+    final connectedOutput = devices.cast<AudioDevice?>().firstWhere(
+      (d) => d!.isOutput && d.isConnected,
+      orElse: () => null,
+    );
+    if (connectedOutput != null) return connectedOutput.id;
+
+    final anyOutput = devices.cast<AudioDevice?>().firstWhere(
+      (d) => d!.isOutput,
+      orElse: () => null,
+    );
+    return anyOutput?.id ?? 'builtin-speaker';
+  }
+
+  String _labelFor(String type) {
+    if (type.contains('bluetooth')) return 'Bluetooth';
+    return switch (type) {
+      'wiredHeadset' || 'wiredHeadphones' => 'Cable',
+      'builtInSpeaker' => 'Integrado',
+      _ => 'Externo',
+    };
+  }
 
   String _cleanName(String raw) => raw.replaceAll(RegExp(r'\[.*?\]'), '').trim();
 

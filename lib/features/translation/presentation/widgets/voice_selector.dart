@@ -31,21 +31,23 @@ class VoiceSelector extends StatelessWidget {
 
     return Column(
       children: voices.map((voice) {
-        final selected = voices.firstWhere(
-          (v) => v.name == selectedVoiceName,
-          orElse: () => voices.first,
-        );
-        return RadioListTile<VoiceActor>(
+        final isSelected = voice.name == selectedVoiceName;
+        return ListTile(
+          leading: Radio<VoiceActor>(
+            value: voice,
+            groupValue: voices.firstWhere(
+              (v) => v.name == selectedVoiceName,
+              orElse: () => voices.first,
+            ),
+            onChanged: (v) {
+              if (v != null) onChanged(v);
+            },
+          ),
           title: Text(voice.displayName),
           subtitle: Text(voice.gender == VoiceGender.female ? 'Voz femenina' : 'Voz masculina'),
-          value: voice,
-          groupValue: selected,
-          onChanged: (v) {
-            if (v != null) onChanged(v);
-          },
           dense: true,
           contentPadding: EdgeInsets.zero,
-          toggleable: false,
+          onTap: () => onChanged(voice),
         );
       }).toList(),
     );
