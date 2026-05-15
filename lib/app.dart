@@ -1,3 +1,4 @@
+import 'package:audio_traductor/core/services/tab_index_provider.dart';
 import 'package:audio_traductor/core/theme/app_theme.dart';
 import 'package:audio_traductor/features/translation/presentation/providers/theme_provider.dart';
 import 'package:audio_traductor/features/translation/presentation/providers/translation_provider.dart';
@@ -48,8 +49,6 @@ class MainShell extends ConsumerStatefulWidget {
 }
 
 class _MainShellState extends ConsumerState<MainShell> with WidgetsBindingObserver {
-  int _currentIndex = 0;
-
   final _screens = const <Widget>[
     HomeScreen(),
     HistoryScreen(),
@@ -82,6 +81,7 @@ class _MainShellState extends ConsumerState<MainShell> with WidgetsBindingObserv
     final gradientColors = brightness == Brightness.dark
         ? AppTheme.darkGradient
         : AppTheme.lightGradient;
+    final currentIndex = ref.watch(tabIndexProvider);
 
     return Container(
       decoration: BoxDecoration(
@@ -94,17 +94,17 @@ class _MainShellState extends ConsumerState<MainShell> with WidgetsBindingObserv
       child: Scaffold(
         backgroundColor: Colors.transparent,
         body: IndexedStack(
-          index: _currentIndex,
+          index: currentIndex,
           children: _screens,
         ),
         bottomNavigationBar: NavigationBar(
-          selectedIndex: _currentIndex,
+          selectedIndex: currentIndex,
           onDestinationSelected: (index) {
             // Pausar traducción si se sale de la pestaña Traductor
-            if (_currentIndex == 0 && index != 0) {
+            if (currentIndex == 0 && index != 0) {
               ref.read(translationProvider.notifier).stopTranslation();
             }
-            setState(() => _currentIndex = index);
+            ref.read(tabIndexProvider.notifier).state = index;
             // Refrescar historial cada vez que se entra a la pestaña
             if (index == 1) {
               ref.invalidate(historyProvider);

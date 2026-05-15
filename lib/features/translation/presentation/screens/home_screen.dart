@@ -1,4 +1,6 @@
 import 'package:audio_traductor/core/constants/app_constants.dart';
+import 'package:audio_traductor/core/services/tab_index_provider.dart';
+import 'package:audio_traductor/core/utils/language_utils.dart';
 import 'package:audio_traductor/core/services/audio_device_manager.dart';
 import 'package:audio_traductor/core/services/bluetooth_provider.dart';
 import 'package:audio_traductor/features/translation/domain/entities/translation_paragraph.dart';
@@ -162,7 +164,7 @@ class HomeScreen extends ConsumerWidget {
                       // Entrada
                       Expanded(
                         child: InkWell(
-                          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen())),
+                          onTap: () => ref.read(tabIndexProvider.notifier).state = 2,
                       borderRadius: BorderRadius.circular(12),
                       child: Container(
                         padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 10),
@@ -192,7 +194,7 @@ class HomeScreen extends ConsumerWidget {
                   // Salida
                   Expanded(
                     child: InkWell(
-                      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen())),
+                      onTap: () => ref.read(tabIndexProvider.notifier).state = 2,
                       borderRadius: BorderRadius.circular(12),
                       child: Container(
                         padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 10),
@@ -251,59 +253,122 @@ class HomeScreen extends ConsumerWidget {
               ),
             ),
 
-      // ── Botón de grabación ──
-            Expanded(
-              child: Column(
-                children: [
-                  if (state.paragraphs.isEmpty) const Spacer(),
-                  Center(
+      // ── Descarga de modelos ML Kit ──
+            if (state.status == TranslationStatus.downloadingModels)
+              Expanded(
+                child: Center(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 32),
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        RecordingButton(
-                          isStreaming: state.isStreaming,
-                          onStart: () {
-                            ref.read(translationProvider.notifier).startTranslation(
-                              sourceLanguage: settings.sourceLanguage,
-                              targetLanguage: settings.targetLanguage,
-                              voiceName: settings.voiceName,
-                              speed: settings.speed,
-                              existingSessionId: state.currentSessionId,
-                              sessionName: state.sessionName,
-                            );
-                          },
-                          onStop: () => ref.read(translationProvider.notifier).stopTranslation(),
+                        Icon(Icons.download_rounded, size: 48,
+                          color: colorScheme.primary),
+                        const SizedBox(height: 16),
+                        Text(
+                          'Descargando modelos de idioma',
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: LinearProgressIndicator(
+                            value: state.downloadProgress,
+                            minHeight: 8,
+                            backgroundColor: colorScheme.surfaceContainerHighest,
+                          ),
                         ),
                         const SizedBox(height: 12),
                         Text(
-                          state.micMode && state.isStreaming
-                              ? 'Micrófono activo'
-                              : switch (state.status) {
-                                  TranslationStatus.idle => state.micMode ? 'Micrófono' : 'Toca para empezar',
-                                  TranslationStatus.listening => 'Escuchando...',
-                                  TranslationStatus.translating => 'Traduciendo...',
-                                  TranslationStatus.playing => 'Reproduciendo...',
-                                  TranslationStatus.error => 'Error',
-                                },
-                          style: theme.textTheme.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant),
+                          state.downloadLanguage != null
+                              ? (state.downloadProgress < 0.5
+                                  ? 'Paso 1/2: ${LangUtils.name(state.downloadLanguage!)}'
+                                  : 'Paso 2/2: ${LangUtils.name(state.downloadLanguage!)}')
+                              : 'Preparando...',
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: colorScheme.onSurfaceVariant,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '${(state.downloadProgress * 100).round()}%',
+                          style: theme.textTheme.displaySmall?.copyWith(
+                            fontWeight: FontWeight.w700,
+                            color: colorScheme.primary,
+                          ),
+                        ),
+                        const SizedBox(height: 24),
+                        Text(
+                          'Se necesita internet solo esta vez.\nLuego funcionará sin conexión.',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
+                          ),
+                          textAlign: TextAlign.center,
                         ),
                       ],
                     ),
                   ),
-                  if (state.paragraphs.isEmpty) const Spacer(),
-
-                  // ── Párrafos en vivo (últimos 4) ──
-                  if (state.paragraphs.isNotEmpty) ...[
-                    const SizedBox(height: 16),
-                    _LiveParagraphs(
-                      paragraphs: state.paragraphs,
-                      playingId: state.playingParagraphId,
-                      onTap: () => _openLiveSession(context, ref),
-                    ),
-                  ],
-                ],
+                ),
               ),
-            ),
+
+      // ── Botón de grabación ──
+            if (state.status != TranslationStatus.downloadingModels)
+              Expanded(
+                child: Column(
+                  children: [
+                    if (state.paragraphs.isEmpty) const Spacer(),
+                    Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          RecordingButton(
+                            isStreaming: state.isStreaming,
+                            onStart: () {
+                              ref.read(translationProvider.notifier).startTranslation(
+                                sourceLanguage: settings.sourceLanguage,
+                                targetLanguage: settings.targetLanguage,
+                                voiceName: settings.voiceName,
+                                speed: settings.speed,
+                                existingSessionId: state.currentSessionId,
+                                sessionName: state.sessionName,
+                              );
+                            },
+                            onStop: () => ref.read(translationProvider.notifier).stopTranslation(),
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            state.micMode && state.isStreaming
+                                ? 'Micrófono activo'
+                                : switch (state.status) {
+                                    TranslationStatus.idle => state.micMode ? 'Micrófono' : 'Toca para empezar',
+                                    TranslationStatus.listening => 'Escuchando...',
+                                    TranslationStatus.translating => 'Traduciendo...',
+                                    TranslationStatus.playing => 'Reproduciendo...',
+                                    TranslationStatus.error => 'Error',
+                                    TranslationStatus.downloadingModels => '',
+                                  },
+                            style: theme.textTheme.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (state.paragraphs.isEmpty) const Spacer(),
+
+                    // ── Párrafos en vivo (últimos 4) ──
+                    if (state.paragraphs.isNotEmpty) ...[
+                      const SizedBox(height: 16),
+                      _LiveParagraphs(
+                        paragraphs: state.paragraphs,
+                        playingId: state.playingParagraphId,
+                        onTap: () => _openLiveSession(context, ref),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
           ],
         ),
       ),

@@ -6,7 +6,7 @@ import 'package:audio_traductor/features/translation/domain/entities/translation
 import 'package:audio_traductor/features/translation/domain/entities/translation_session.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-enum TranslationStatus { idle, listening, translating, playing, error }
+enum TranslationStatus { idle, listening, translating, playing, error, downloadingModels }
 
 class TranslationState {
   final TranslationStatus status;
@@ -17,6 +17,8 @@ class TranslationState {
   final String? currentSessionId;
   final String sessionName;
   final bool micMode;
+  final double downloadProgress;
+  final String? downloadLanguage;
 
   const TranslationState({
     this.status = TranslationStatus.idle,
@@ -27,6 +29,8 @@ class TranslationState {
     this.currentSessionId,
     this.sessionName = '',
     this.micMode = false,
+    this.downloadProgress = 0.0,
+    this.downloadLanguage,
   });
 
   TranslationState copyWith({
@@ -38,6 +42,8 @@ class TranslationState {
     String? currentSessionId,
     String? sessionName,
     bool? micMode,
+    double? downloadProgress,
+    String? downloadLanguage,
   }) {
     return TranslationState(
       status: status ?? this.status,
@@ -48,6 +54,8 @@ class TranslationState {
       currentSessionId: currentSessionId,
       sessionName: sessionName ?? this.sessionName,
       micMode: micMode ?? this.micMode,
+      downloadProgress: downloadProgress ?? this.downloadProgress,
+      downloadLanguage: downloadLanguage ?? this.downloadLanguage,
     );
   }
 }
@@ -99,9 +107,39 @@ class TranslationNotifier extends StateNotifier<TranslationState> {
       return;
     }
 
+    // ── Verificar / descargar modelos de ML Kit ──
+    final modelsReady = await InjectionContainer.areModelsDownloaded(
+      sourceLanguage,
+      targetLanguage,
+    );
+
+    if (!modelsReady) {
+      state = state.copyWith(
+        status: TranslationStatus.downloadingModels,
+        isStreaming: false,
+        downloadProgress: 0.0,
+        downloadLanguage: null,
+        paragraphs: [],
+        errorMessage: null,
+      );
+
+      await InjectionContainer.downloadModels(
+        source: sourceLanguage,
+        target: targetLanguage,
+        onProgress: (progress, lang) {
+          state = state.copyWith(
+            downloadProgress: progress,
+            downloadLanguage: lang.isEmpty ? state.downloadLanguage : lang,
+          );
+        },
+      );
+    }
+
     state = state.copyWith(
       status: TranslationStatus.listening,
       isStreaming: true,
+      downloadProgress: 0.0,
+      downloadLanguage: null,
       paragraphs: [],
       errorMessage: null,
     );

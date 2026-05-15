@@ -2,6 +2,7 @@ import 'package:audio_traductor/core/constants/api_constants.dart';
 import 'package:audio_traductor/features/translation/data/datasources/google_stt_datasource.dart';
 import 'package:audio_traductor/features/translation/data/datasources/google_translate_datasource.dart';
 import 'package:audio_traductor/features/translation/data/datasources/google_tts_datasource.dart';
+import 'package:audio_traductor/features/translation/data/datasources/ml_kit_translate_datasource.dart';
 import 'package:audio_traductor/features/translation/data/datasources/translation_local_datasource.dart';
 import 'package:audio_traductor/features/translation/data/repositories/translation_repository_impl.dart';
 import 'package:audio_traductor/features/translation/domain/repositories/translation_repository.dart';
@@ -12,7 +13,7 @@ import 'package:audio_traductor/features/translation/domain/usecases/stop_stream
 class InjectionContainer {
   // ── DataSources ──
   static final SttDatasource _stt = GoogleSttDatasource(ApiConstants.sttApiKey);
-  static final TranslateDatasource _translate = GoogleTranslateDatasource();
+  static final TranslateDatasource _translate = MlKitTranslateDatasource();
   static final TtsDatasource _tts = RealTtsDatasource.instance;
   static final _local = TranslationLocalDatasource();
 
@@ -35,6 +36,25 @@ class InjectionContainer {
       DeleteTranslationSession(_repository);
   static final ClearTranslationHistory clearHistory =
       ClearTranslationHistory(_repository);
+
+  /// Verifica si los modelos de ML Kit para [source]↔[target] ya están descargados.
+  static Future<bool> areModelsDownloaded(String source, String target) async {
+    return (_translate as MlKitTranslateDatasource)
+        .areModelsDownloaded(source, target);
+  }
+
+  /// Descarga modelos de ML Kit con callback de progreso.
+  static Future<void> downloadModels({
+    required String source,
+    required String target,
+    required void Function(double progress, String languageCode) onProgress,
+  }) async {
+    await (_translate as MlKitTranslateDatasource).downloadModels(
+      source: source,
+      target: target,
+      onProgress: onProgress,
+    );
+  }
 
   static Future<void> init() async {
     await _local.getAllSessions();

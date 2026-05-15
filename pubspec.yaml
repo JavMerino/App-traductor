@@ -14,9 +14,10 @@ dependencies:
   # ── State Management ──
   flutter_riverpod: ^2.6.1
 
-  # ── Google Cloud SDK ──
-  googleapis_auth: ^1.6.0
-  googleapis: ^13.2.0
+  # ── ML Kit On-Device Translation ──
+  google_mlkit_translation: ^0.13.1
+
+  # ── HTTP (solo STT cloud, si se usa) ──
   http: ^1.6.0
 
   # ── Audio ──

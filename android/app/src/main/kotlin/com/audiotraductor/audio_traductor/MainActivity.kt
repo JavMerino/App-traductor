@@ -481,12 +481,16 @@ class MainActivity : FlutterActivity() {
             val adapter = BluetoothAdapter.getDefaultAdapter() ?: return
             adapter.getProfileProxy(this, object : BluetoothProfile.ServiceListener {
                 override fun onServiceConnected(profile: Int, proxy: BluetoothProfile) {
-                    if (profile != BluetoothProfile.HEADSET) return
-                    val headset = proxy as BluetoothHeadset
-                    val devices = headset.connectedDevices
-                    for (device in devices) {
-                        try { headset.stopVoiceRecognition(device) } catch (_: Exception) {}
-                    }
+                    try {
+                        if (profile != BluetoothProfile.HEADSET) return
+                        val headset = proxy as BluetoothHeadset
+                        val devices = headset.connectedDevices
+                        for (device in devices) {
+                            try { headset.stopVoiceRecognition(device) } catch (_: Exception) {}
+                        }
+                    } catch (_: SecurityException) {
+                        // Sin permiso BLUETOOTH_CONNECT, no podemos interactuar con HFP
+                    } catch (_: Exception) {}
                     adapter.closeProfileProxy(BluetoothProfile.HEADSET, proxy)
                 }
                 override fun onServiceDisconnected(profile: Int) {}
