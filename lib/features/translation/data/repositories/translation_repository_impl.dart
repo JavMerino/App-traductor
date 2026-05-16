@@ -79,6 +79,18 @@ class TranslationRepositoryImpl implements TranslationRepository {
       (sttResult) async {
         if (sttResult.transcript.isEmpty) return;
 
+        // Solo traducir cuando el STT confirma que es final.
+        // Con ML Kit (on-device) la traducción es instantánea, así que
+        // si traducimos parciales se van a ver pedazos de frases sueltas.
+        if (!sttResult.isFinal) {
+          _chunkController?.add(TranslationChunk(
+            originalText: sttResult.transcript,
+            translatedText: '',
+            isFinal: false,
+          ));
+          return;
+        }
+
         try {
           final translateResult = await _translate.translate(
             text: sttResult.transcript,
@@ -86,32 +98,30 @@ class TranslationRepositoryImpl implements TranslationRepository {
             targetLanguage: targetLanguage,
           );
 
-          if (sttResult.isFinal) {
-            // Encadenar reproducción: esperar a que termine la anterior
-            _ttsQueue = (_ttsQueue ?? Future.value()).then((_) {
-              return _tts.synthesize(
-                text: translateResult.translatedText,
-                voiceName: voiceName,
-                languageCode: targetLanguage,
-                speed: _speed,
-              );
-            }).catchError((_) => const TtsResult(audioBase64: '', audioFormat: ''));
+          // Encadenar reproducción: esperar a que termine la anterior
+          _ttsQueue = (_ttsQueue ?? Future.value()).then((_) {
+            return _tts.synthesize(
+              text: translateResult.translatedText,
+              voiceName: voiceName,
+              languageCode: targetLanguage,
+              speed: _speed,
+            );
+          }).catchError((_) => const TtsResult(audioBase64: '', audioFormat: ''));
 
-            _paragraphs.add(TranslationParagraph(
-              id: 'p${_paragraphs.length + 1}',
-              originalText: sttResult.transcript,
-              translatedText: translateResult.translatedText,
-              sourceLanguage: sourceLanguage,
-              targetLanguage: targetLanguage,
-              timestamp: DateTime.now(),
-            ));
-            _persistCurrentSession();
-          }
+          _paragraphs.add(TranslationParagraph(
+            id: 'p${_paragraphs.length + 1}',
+            originalText: sttResult.transcript,
+            translatedText: translateResult.translatedText,
+            sourceLanguage: sourceLanguage,
+            targetLanguage: targetLanguage,
+            timestamp: DateTime.now(),
+          ));
+          _persistCurrentSession();
 
           _chunkController?.add(TranslationChunk(
             originalText: sttResult.transcript,
             translatedText: translateResult.translatedText,
-            isFinal: sttResult.isFinal,
+            isFinal: true,
           ));
         } catch (e) {
           _chunkController?.addError(e);
