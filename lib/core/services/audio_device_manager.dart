@@ -74,18 +74,19 @@ class AudioDeviceNotifier extends StateNotifier<AudioDevicesState> {
     _loadConnectedBT();
   }
 
-  /// Configura la sesión de audio para Bluetooth.
-  /// voiceCommunication activa el perfil SCO (bidireccional) en Android,
-  /// necesario para headsets con micrófono.
+  /// Configura la sesión de audio.
+  /// NO usa voiceCommunication ni allowBluetooth porque eso activa el perfil
+  /// SCO (bidireccional) y Android enruta el micrófono por BT.
+  /// Con voiceRecognition + allowBluetoothA2DP, la salida de audio puede ir
+  /// por BT (A2DP) pero el micrófono se queda en el teléfono.
   Future<void> _configureSession() async {
     try {
       await _session?.configure(a.AudioSessionConfiguration(
         avAudioSessionCategory: a.AVAudioSessionCategory.playAndRecord,
-        avAudioSessionCategoryOptions: a.AVAudioSessionCategoryOptions.allowBluetooth |
-            a.AVAudioSessionCategoryOptions.defaultToSpeaker,
+        avAudioSessionCategoryOptions: a.AVAudioSessionCategoryOptions.defaultToSpeaker,
         androidAudioAttributes: const a.AndroidAudioAttributes(
           contentType: a.AndroidAudioContentType.speech,
-          usage: a.AndroidAudioUsage.voiceCommunication,
+          usage: a.AndroidAudioUsage.media,
         ),
         androidAudioFocusGainType: a.AndroidAudioFocusGainType.gain,
       ));

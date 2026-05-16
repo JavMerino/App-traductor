@@ -9,6 +9,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.media.*
 import android.os.Build
 import android.os.Handler
@@ -37,6 +38,8 @@ class MainActivity : FlutterActivity() {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var btReceiverRegistered = false
     private var lastCommDevice: AudioDeviceInfo? = null
+    private var selectedOutputAddress: String? = null
+    private var selectedOutputName: String? = null
     private val btStateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             try {
@@ -130,18 +133,22 @@ class MainActivity : FlutterActivity() {
             addressFromId.isEmpty() && !normalizedType.contains("bluetooth") && !normalizedId.contains(":")
 
         if (normalizedName.isEmpty() || isBuiltinOutput) {
+            selectedOutputAddress = null
+            selectedOutputName = null
             audioManager.mode = AudioManager.MODE_NORMAL
             audioManager.isSpeakerphoneOn = true
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 audioManager.clearCommunicationDevice()
             }
+            applyPreferredOutputToAudioTrack()
             scheduleBuiltinMicReassertion()
             return
         }
 
-        // Rutear salida al BT seleccionado
+        // Rutear salida al BT seleccionado SIN tocar el dispositivo de entrada.
+        // setCommunicationDevice() roba también el micrófono y lo mueve al BT.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+            audioManager.mode = AudioManager.MODE_NORMAL
             audioManager.clearCommunicationDevice()
 
             val allDevices = buildList {
@@ -160,12 +167,35 @@ class MainActivity : FlutterActivity() {
             }
 
             if (matched != null) {
-                audioManager.setCommunicationDevice(matched)
+                selectedOutputAddress = matched.address?.trim()?.lowercase()
+                selectedOutputName = matched.productName?.toString()?.trim()?.lowercase()
                 audioManager.isSpeakerphoneOn = false
+                applyPreferredOutputToAudioTrack()
                 scheduleBuiltinMicReassertion()
                 rebuildActiveRecordingToBuiltinMic()
             }
         }
+    }
+
+    private fun applyPreferredOutputToAudioTrack() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
+        val track = audioTrack ?: return
+        val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        val devices = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+
+        val address = selectedOutputAddress
+        val name = selectedOutputName
+
+        val preferred = devices.firstOrNull { device ->
+            val deviceAddress = device.address?.trim()?.lowercase().orEmpty()
+            val productName = device.productName?.toString()?.trim()?.lowercase().orEmpty()
+            (address != null && address.isNotEmpty() && deviceAddress == address) ||
+            (name != null && name.isNotEmpty() && productName == name)
+        }
+
+        try {
+            track.preferredDevice = preferred
+        } catch (_: Exception) {}
     }
 
     private fun extractAddressFromId(id: String): String {
@@ -322,11 +352,13 @@ class MainActivity : FlutterActivity() {
 
                         audioRecord = buildBuiltinAudioRecord(bufferSize)
 
-                        // API 31+: forzar el mic del teléfono
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                            enforceBuiltinMicOnActiveRecording()
-                        }
+                        // Forzar el mic interno usando DISPOSITIVOS DE ENTRADA.
+                        // preferredDevice de AudioRecord debe apuntar a un input real,
+                        // no a availableCommunicationDevices.
+                        enforceBuiltinMicOnActiveRecording()
 
+                        // Desconectar HFP justo antes de arrancar
+                        disconnectHeadsetHfp()
                         audioRecord?.startRecording()
                         scheduleBuiltinMicReassertion()
 
@@ -369,14 +401,24 @@ class MainActivity : FlutterActivity() {
     }
 
     /// Restaura el dispositivo de salida guardado.
+    ///
+    /// IMPORTANTE: NO usa setCommunicationDevice porque eso reactiva el HFP
+    /// del BT y vuelve a tomar el micrófono del headset. En su lugar solo
+    /// controlamos el altavoz y reaffirmamos el mic del celu.
     private fun restoreOutput() {
-        val comm = lastCommDevice ?: return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-            am.setCommunicationDevice(comm)
+            val comm = lastCommDevice
+            if (comm != null &&
+                comm.type != AudioDeviceInfo.TYPE_BLUETOOTH_A2DP &&
+                comm.type != AudioDeviceInfo.TYPE_BLUETOOTH_SCO
+            ) {
+                // Solo restaurar dispositivos NO Bluetooth
+                am.setCommunicationDevice(comm)
+            }
             am.isSpeakerphoneOn = false
         }
-        // Re-afirmar mic del celular por si setCommunicationDevice re-conectó SCO
+        // Re-afirmar mic del celular
         enforceBuiltinMicOnActiveRecording()
         scheduleBuiltinMicReassertion()
     }
@@ -407,8 +449,12 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun buildBuiltinAudioRecord(bufferSize: Int): AudioRecord {
+        // Usamos VOICE_RECOGNITION que prioriza el micrófono interno
+        val source = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+            MediaRecorder.AudioSource.VOICE_RECOGNITION else
+            MediaRecorder.AudioSource.VOICE_RECOGNITION
         return AudioRecord.Builder()
-            .setAudioSource(MediaRecorder.AudioSource.VOICE_RECOGNITION)
+            .setAudioSource(source)
             .setAudioFormat(
                 AudioFormat.Builder()
                     .setSampleRate(16000)
@@ -449,13 +495,15 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun enforceBuiltinMicOnActiveRecording() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
         try {
-            val preferredDevice = (getSystemService(Context.AUDIO_SERVICE) as AudioManager)
-                .availableCommunicationDevices
-                .firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_MIC }
-            if (preferredDevice != null) {
-                audioRecord?.preferredDevice = preferredDevice
+            val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            val preferredInput = am.getDevices(AudioManager.GET_DEVICES_INPUTS)
+                .firstOrNull { device ->
+                    device.type == AudioDeviceInfo.TYPE_BUILTIN_MIC
+                }
+            if (preferredInput != null) {
+                audioRecord?.preferredDevice = preferredInput
             }
         } catch (_: Exception) {}
     }
@@ -477,6 +525,12 @@ class MainActivity : FlutterActivity() {
     /// Desconecta el perfil HFP (manos libres) de todos los headsets BT.
     /// Así el micrófono vuelve al teléfono manteniendo A2DP para salida.
     private fun disconnectHeadsetHfp() {
+        // Si no tenemos permiso BLUETOOTH_CONNECT, no podemos interactuar con HFP
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT)
+                != PackageManager.PERMISSION_GRANTED
+        ) return
+
         try {
             val adapter = BluetoothAdapter.getDefaultAdapter() ?: return
             adapter.getProfileProxy(this, object : BluetoothProfile.ServiceListener {
@@ -488,8 +542,6 @@ class MainActivity : FlutterActivity() {
                         for (device in devices) {
                             try { headset.stopVoiceRecognition(device) } catch (_: Exception) {}
                         }
-                    } catch (_: SecurityException) {
-                        // Sin permiso BLUETOOTH_CONNECT, no podemos interactuar con HFP
                     } catch (_: Exception) {}
                     adapter.closeProfileProxy(BluetoothProfile.HEADSET, proxy)
                 }
@@ -519,6 +571,7 @@ class MainActivity : FlutterActivity() {
                 .setBufferSizeInBytes(bufferSize)
                 .setTransferMode(AudioTrack.MODE_STREAM)
                 .build()
+            applyPreferredOutputToAudioTrack()
             audioTrack?.play()
         } catch (_: Exception) {
             stopAudioTrack()

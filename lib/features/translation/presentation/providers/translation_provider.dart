@@ -91,6 +91,10 @@ class TranslationNotifier extends StateNotifier<TranslationState> {
   }) async {
     if (state.isStreaming) return;
 
+    // Asegurar que no quede ningún subscription colgado
+    await _subscription?.cancel();
+    _subscription = null;
+
     _counter = 0;
     _currentTargetLanguage = targetLanguage;
     _currentVoiceName = voiceName;
@@ -217,24 +221,33 @@ class TranslationNotifier extends StateNotifier<TranslationState> {
   }
 
   Future<void> stopTranslation() async {
-    // Detener cualquier audio en curso (TTS o passthrough)
+    // 1. Cortar audio inmediatamente
     RealTtsDatasource.instance.stop();
 
-    // Si está en modo micrófono, solo detener passthrough
+    // 2. Cancelar listener del stream de chunks ANTES de tocar el estado
+    // (si un chunk llega entre el idle y la cancelación, revierte el estado)
+    await _subscription?.cancel();
+    _subscription = null;
+
+    // 3. Pasar a idle
+    state = state.copyWith(
+      status: TranslationStatus.idle,
+      isStreaming: false,
+      downloadProgress: 0.0,
+      downloadLanguage: null,
+    );
+
+    // Modo micrófono: solo detener passthrough
     if (state.micMode) {
       await _passthrough.stop();
-      state = state.copyWith(status: TranslationStatus.idle, isStreaming: false);
       return;
     }
 
-    await _subscription?.cancel();
-    _subscription = null;
+    // Detener el repo (STT, TTS queue, persistir sesión)
     final result = await InjectionContainer.stopTranslation();
     result.fold(
-      (failure) => state = state.copyWith(status: TranslationStatus.error, errorMessage: failure.message, isStreaming: false),
+      (failure) => state = state.copyWith(errorMessage: failure.message),
       (session) => state = state.copyWith(
-        status: TranslationStatus.idle,
-        isStreaming: false,
         currentSessionId: session.id,
         sessionName: session.name,
       ),

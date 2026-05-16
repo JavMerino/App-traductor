@@ -14,6 +14,9 @@ abstract class TtsDatasource {
     required String languageCode,
     required double speed,
   });
+
+  /// Detiene cualquier síntesis en curso.
+  Future<void> stop();
 }
 
 /// Resultado del TTS.
@@ -203,6 +206,9 @@ class MockTtsDatasource implements TtsDatasource {
     await Future.delayed(const Duration(milliseconds: 400));
     return const TtsResult(audioBase64: 'MOCK_AUDIO_DATA', audioFormat: 'mp3');
   }
+
+  @override
+  Future<void> stop() async {} // no-op
 }
 
 /// Implementación con Google Cloud Text-to-Speech API.
@@ -263,6 +269,9 @@ class GoogleTtsDatasource implements TtsDatasource {
       );
     }
   }
+
+  @override
+  Future<void> stop() async {} // no-op
 
   String _mapLanguage(String code) {
     const map = {

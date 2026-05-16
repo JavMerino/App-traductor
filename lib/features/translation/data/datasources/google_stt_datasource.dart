@@ -199,12 +199,21 @@ class GoogleSttDatasource implements SttDatasource {
         return const <int>[];
       });
 
-      // 4. Restaurar dispositivo de salida una vez que el recorder ya arrancó
+      // 4. NO restauramos output acá.
+      //
+      // En modo "Micrófono (voz directa)", el flujo nativo usa startRecording()
+      // sin restoreOutput() y mantiene correctamente:
+      //   - entrada: micrófono interno del celular
+      //   - salida: dispositivo BT seleccionado
+      //
+      // En el flujo de traducción, restoreOutput() termina reactivando rutas
+      // Bluetooth/HFP y Android vuelve a tomar el mic del dispositivo BT.
+      // Para forzar SIEMPRE el mic interno, dejamos la misma estrategia que
+      // en voz directa: startRecording() y nada más.
       _micSub = stream.listen(
         _onAudioData,
         onError: (e) => _controller?.addError('Mic: $e'),
       );
-      _audioChannel.invokeMethod('restoreOutput');
     } catch (e) {
       _controller?.addError('Error al iniciar mic: $e');
     }

@@ -28,7 +28,12 @@ class TranslationRepositoryImpl implements TranslationRepository {
   String _currentSessionId = '';
   String _sessionName = '';
   double _speed = 0.5;
-  Future<void>? _ttsQueue; // encadena reproducciones TTS
+  Future<void>? _showQueue; // cola A: traduce → muestra (orden estricto)
+  Future<void>? _ttsQueue; // cola B: audio (orden estricto, independiente de A)
+  bool _stopped = false;
+  int _nextSequence = 0;
+  int _nextToFlush = 0;
+  final Map<int, _QueuedParagraph> _readyParagraphs = {};
 
   TranslationRepositoryImpl({
     required SttDatasource stt,
@@ -49,6 +54,17 @@ class TranslationRepositoryImpl implements TranslationRepository {
     String? existingSessionId,
     String? sessionName,
   }) async* {
+    // Resetear estado por si venimos de una sesión anterior
+    _stopped = false;
+    _showQueue = null;
+    _ttsQueue = null;
+    _sttSubscription = null;
+    _chunkController = null;
+    _paragraphs = [];
+    _nextSequence = 0;
+    _nextToFlush = 0;
+    _readyParagraphs.clear();
+
     _startTimeMs = DateTime.now().millisecondsSinceEpoch;
     _chunkController = StreamController<TranslationChunk>.broadcast();
     _sourceLanguage = sourceLanguage;
@@ -76,12 +92,10 @@ class TranslationRepositoryImpl implements TranslationRepository {
     );
 
     _sttSubscription = sttStream.listen(
-      (sttResult) async {
-        if (sttResult.transcript.isEmpty) return;
+      (sttResult) {
+        if (sttResult.transcript.isEmpty || _stopped) return;
 
         // Solo traducir cuando el STT confirma que es final.
-        // Con ML Kit (on-device) la traducción es instantánea, así que
-        // si traducimos parciales se van a ver pedazos de frases sueltas.
         if (!sttResult.isFinal) {
           _chunkController?.add(TranslationChunk(
             originalText: sttResult.transcript,
@@ -91,41 +105,60 @@ class TranslationRepositoryImpl implements TranslationRepository {
           return;
         }
 
-        try {
-          final translateResult = await _translate.translate(
-            text: sttResult.transcript,
-            sourceLanguage: sourceLanguage,
-            targetLanguage: targetLanguage,
-          );
+        final sequence = _nextSequence++;
 
-          // Encadenar reproducción: esperar a que termine la anterior
-          _ttsQueue = (_ttsQueue ?? Future.value()).then((_) {
-            return _tts.synthesize(
-              text: translateResult.translatedText,
-              voiceName: voiceName,
-              languageCode: targetLanguage,
-              speed: _speed,
-            );
-          }).catchError((_) => const TtsResult(audioBase64: '', audioFormat: ''));
+        // La traducción puede correr en paralelo, PERO el mostrado y el audio
+        // se respetan por orden de secuencia. Si el 3 termina antes que el 2,
+        // se guarda y espera a que el 2 esté listo.
+        unawaited(_translate.translate(
+          text: sttResult.transcript,
+          sourceLanguage: sourceLanguage,
+          targetLanguage: targetLanguage,
+        ).then((translateResult) {
+          if (_stopped) return;
 
-          _paragraphs.add(TranslationParagraph(
-            id: 'p${_paragraphs.length + 1}',
+          _readyParagraphs[sequence] = _QueuedParagraph(
             originalText: sttResult.transcript,
             translatedText: translateResult.translatedText,
             sourceLanguage: sourceLanguage,
             targetLanguage: targetLanguage,
             timestamp: DateTime.now(),
-          ));
-          _persistCurrentSession();
+          );
 
-          _chunkController?.add(TranslationChunk(
-            originalText: sttResult.transcript,
-            translatedText: translateResult.translatedText,
-            isFinal: true,
-          ));
-        } catch (e) {
-          _chunkController?.addError(e);
-        }
+          _showQueue = (_showQueue ?? Future.value()).then((_) async {
+            while (!_stopped && _readyParagraphs.containsKey(_nextToFlush)) {
+              final item = _readyParagraphs.remove(_nextToFlush)!;
+
+              _paragraphs.add(TranslationParagraph(
+                id: 'p${_paragraphs.length + 1}',
+                originalText: item.originalText,
+                translatedText: item.translatedText,
+                sourceLanguage: item.sourceLanguage,
+                targetLanguage: item.targetLanguage,
+                timestamp: item.timestamp,
+              ));
+              await _persistCurrentSession();
+
+              _chunkController?.add(TranslationChunk(
+                originalText: item.originalText,
+                translatedText: item.translatedText,
+                isFinal: true,
+              ));
+
+              _ttsQueue = (_ttsQueue ?? Future.value()).then((_) async {
+                if (_stopped) return;
+                await _tts.synthesize(
+                  text: item.translatedText,
+                  voiceName: voiceName,
+                  languageCode: targetLanguage,
+                  speed: _speed,
+                );
+              }).catchError((_) {});
+
+              _nextToFlush++;
+            }
+          }).catchError((_) {});
+        }).catchError((_) {}));
       },
       onError: (e) => _chunkController?.addError(e),
       onDone: () => _chunkController?.close(),
@@ -150,20 +183,26 @@ class TranslationRepositoryImpl implements TranslationRepository {
   @override
   Future<Either<Failure, TranslationSession>> stopTranslation() async {
     try {
+      // Marcar como detenido ANTES de cancelar, así los callbacks
+      // async pendientes ven la bandera y no procesan nada más.
+      _stopped = true;
+
       // 1. Detener el micrófono — no más párrafos nuevos
       await _stt.stop();
       await _sttSubscription?.cancel();
       _sttSubscription = null;
 
-      // 2. Esperar a que termine toda la cola de TTS (máx 15s)
-      if (_ttsQueue != null) {
-        try {
-          await _ttsQueue!.timeout(const Duration(seconds: 15));
-        } catch (_) {
-          // Timeout o error — seguimos igual, no bloqueamos
-        }
-        _ttsQueue = null;
-      }
+      // 2. Cerrar el controller del chunk stream para que nadie más escuche
+      await _chunkController?.close();
+      _chunkController = null;
+
+      // 3. Cortar TTS en curso y limpiar colas
+      _tts.stop();
+      _showQueue = null;
+      _ttsQueue = null;
+      _readyParagraphs.clear();
+      _nextSequence = 0;
+      _nextToFlush = 0;
 
       final durationMs = DateTime.now().millisecondsSinceEpoch - _startTimeMs;
 
@@ -223,4 +262,20 @@ class TranslationRepositoryImpl implements TranslationRepository {
       return Left(StorageFailure(message: 'Error al limpiar', originalError: e as Object?));
     }
   }
+}
+
+class _QueuedParagraph {
+  final String originalText;
+  final String translatedText;
+  final String sourceLanguage;
+  final String targetLanguage;
+  final DateTime timestamp;
+
+  const _QueuedParagraph({
+    required this.originalText,
+    required this.translatedText,
+    required this.sourceLanguage,
+    required this.targetLanguage,
+    required this.timestamp,
+  });
 }

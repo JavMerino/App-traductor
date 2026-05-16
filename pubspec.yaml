@@ -17,6 +17,9 @@ dependencies:
   # ── ML Kit On-Device Translation ──
   google_mlkit_translation: ^0.13.1
 
+  # ── Permisos runtime (BLUETOOTH_CONNECT) ──
+  permission_handler: ^11.3.1
+
   # ── HTTP (solo STT cloud, si se usa) ──
   http: ^1.6.0
 
