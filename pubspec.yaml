@@ -63,6 +63,21 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.3
+  flutter_native_splash: ^2.4.4
 
 flutter:
   uses-material-design: true
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/icon-traductor.png"
+  remove_alpha_ios: true
+
+flutter_native_splash:
+  background_image: assets/splash-bg.png
+  image: assets/icon-sf.png
+  android: true
+  ios: true
+  web: false

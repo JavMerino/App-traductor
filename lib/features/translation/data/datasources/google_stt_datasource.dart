@@ -169,6 +169,7 @@ class GoogleSttDatasource implements SttDatasource {
   final List<int> _buffer = [];
   int _silenceSamples = 0;
   bool _hadSpeech = false;
+  Future<void>? _recognitionQueue;
 
   GoogleSttDatasource(this._apiKey);
 
@@ -183,6 +184,7 @@ class GoogleSttDatasource implements SttDatasource {
     _buffer.clear();
     _silenceSamples = 0;
     _hadSpeech = false;
+    _recognitionQueue = null;
 
     try {
       // 1. Forzar mic del celular (también guarda comm device antes de limpiar)
@@ -240,7 +242,7 @@ class GoogleSttDatasource implements SttDatasource {
     // ¿500ms de silencio después de hablar?
     final silenceMs = _silenceSamples * 1000 ~/ 16000;
     if (_hadSpeech && silenceMs >= _silenceThresholdMs) {
-      _recognizeBatch();
+      _enqueueRecognizeBatch();
     }
   }
 
@@ -256,12 +258,20 @@ class GoogleSttDatasource implements SttDatasource {
     return count > 0 ? sum / count : 0.0;
   }
 
-  Future<void> _recognizeBatch() async {
+  void _enqueueRecognizeBatch() {
     if (_buffer.isEmpty || _stopping) return;
     final pcmData = List<int>.from(_buffer);
     _buffer.clear();
     _hadSpeech = false;
     _silenceSamples = 0;
+
+    _recognitionQueue = (_recognitionQueue ?? Future.value())
+        .then((_) => _recognizeBatch(pcmData))
+        .catchError((_) {});
+  }
+
+  Future<void> _recognizeBatch(List<int> pcmData) async {
+    if (pcmData.isEmpty || _stopping) return;
 
     try {
       final base64Audio = base64Encode(pcmData);
@@ -320,6 +330,7 @@ class GoogleSttDatasource implements SttDatasource {
     _stopping = true;
     await _micSub?.cancel();
     _micSub = null;
+    _recognitionQueue = null;
     try {
       await _audioChannel.invokeMethod('stopRecording');
     } catch (_) {}
