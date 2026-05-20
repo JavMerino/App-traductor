@@ -14,6 +14,7 @@ import android.media.*
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import io.flutter.embedding.android.FlutterActivity
@@ -117,6 +118,30 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "com.audiotraductor/system"
+        ).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "openBluetoothSettings" -> {
+                    try {
+                        openBluetoothSettings()
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.error("bt_settings_error", e.message, null)
+                    }
+                }
+                else -> result.notImplemented()
+            }
+        }
+    }
+
+    private fun openBluetoothSettings() {
+        val intent = Intent(Settings.ACTION_BLUETOOTH_SETTINGS).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        startActivity(intent)
     }
 
     /// Captura audio nativo con AudioRecord usando VOICE_RECOGNITION

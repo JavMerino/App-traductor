@@ -67,17 +67,11 @@ class BluetoothNotifier extends StateNotifier<BluetoothState> {
     }
   }
 
-  /// Activa o desactiva el Bluetooth.
-  /// Encender siempre muestra el diálogo del sistema.
-  /// Apagar puede no funcionar en todos los dispositivos.
-  Future<void> toggleAdapter() async {
+  /// Abre la pantalla nativa de Bluetooth del sistema para que el usuario
+  /// encienda el adaptador y conecte manualmente su dispositivo.
+  Future<void> openSystemBluetoothSettings() async {
     try {
-      if (state.isAdapterOn) {
-        // Intentar apagar — puede fallar según la versión de Android
-        await fbp.FlutterBluePlus.turnOn(); // no-op si ya está prendido
-      } else {
-        await fbp.FlutterBluePlus.turnOn();
-      }
+      await _service.openSystemBluetoothSettings();
     } catch (_) {}
   }
 

@@ -60,12 +60,14 @@ class _AudioDevicesPanelState extends ConsumerState<AudioDevicesPanel> {
           visualDensity: VisualDensity.compact,
           title: Text('Bluetooth', style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w500)),
           subtitle: Text(
-            bt.isAdapterOn ? 'Activado' : 'Desactivado',
+            bt.isAdapterOn
+                ? 'Activado'
+                : 'Abrir ajustes Bluetooth para activar y conectar',
             style: TextStyle(fontSize: 12, color: bt.isAdapterOn ? Colors.green : colorScheme.onSurfaceVariant),
           ),
           value: bt.isAdapterOn,
           onChanged: (v) {
-            if (v) ref.read(bluetoothProvider.notifier).toggleAdapter();
+            if (v) ref.read(bluetoothProvider.notifier).openSystemBluetoothSettings();
           },
           secondary: Icon(
             Icons.bluetooth,
@@ -148,7 +150,7 @@ class _AudioDevicesPanelState extends ConsumerState<AudioDevicesPanel> {
             borderRadius: BorderRadius.circular(8),
           ),
           child: Text(
-            'Escaneá y conectá dispositivos BT. Al conectar uno, seleccionalo como salida.',
+            'Podés conectar desde los ajustes del sistema o escanear desde la app. Al conectar uno, seleccionalo como salida.',
             style: TextStyle(fontSize: 11, color: colorScheme.onSurfaceVariant),
           ),
         ),

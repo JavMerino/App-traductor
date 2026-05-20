@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/services.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart' as fbp;
 
 /// Dispositivo Bluetooth encontrado en el scan.
@@ -18,6 +19,7 @@ class BTDevice {
 
 /// Servicio de Bluetooth – scan, conexión y estado de dispositivos de audio.
 class BluetoothService {
+  static const MethodChannel _systemChannel = MethodChannel('com.audiotraductor/system');
   StreamSubscription<List<fbp.ScanResult>>? _scanSub;
   fbp.BluetoothDevice? _connectedDevice;
 
@@ -123,6 +125,10 @@ class BluetoothService {
     _connectedDevice = null;
     _currentConnected = null;
     _connectionController.add(null);
+  }
+
+  Future<void> openSystemBluetoothSettings() async {
+    await _systemChannel.invokeMethod('openBluetoothSettings');
   }
 
   void dispose() {
