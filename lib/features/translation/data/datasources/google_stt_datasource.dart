@@ -155,7 +155,7 @@ class MockSttDatasource implements SttDatasource {
 /// Implementación con Google Cloud Speech-to-Text API.
 /// Captura audio con [record] package y detecta pausas para enviar párrafos.
 class GoogleSttDatasource implements SttDatasource {
-  static const _silenceThresholdMs = 500;
+  static const _silenceThresholdMs = 400;
   static const _rmsThreshold = 1000;
   static const _audioChannel = MethodChannel('com.audiotraductor/audio');
   static const _micChannel = EventChannel('com.audiotraductor/mic');
@@ -239,7 +239,7 @@ class GoogleSttDatasource implements SttDatasource {
       _silenceSamples += samplesInChunk;
     }
 
-    // ¿500ms de silencio después de hablar?
+    // ¿400ms de silencio después de hablar?
     final silenceMs = _silenceSamples * 1000 ~/ 16000;
     if (_hadSpeech && silenceMs >= _silenceThresholdMs) {
       _enqueueRecognizeBatch();
