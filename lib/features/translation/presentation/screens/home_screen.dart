@@ -360,6 +360,17 @@ class HomeScreen extends ConsumerWidget {
                     // ── Párrafos en vivo (últimos 4) ──
                     if (state.paragraphs.isNotEmpty) ...[
                       const SizedBox(height: 16),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: Padding(
+                          padding: const EdgeInsets.only(right: 4, bottom: 8),
+                          child: TextButton.icon(
+                            onPressed: () => ref.read(translationProvider.notifier).clearVisibleParagraphs(),
+                            icon: const Icon(Icons.cleaning_services_outlined, size: 18),
+                            label: const Text('Limpiar'),
+                          ),
+                        ),
+                      ),
                       _LiveParagraphs(
                         paragraphs: state.paragraphs,
                         playingId: state.playingParagraphId,

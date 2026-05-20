@@ -201,6 +201,11 @@ class TranslationNotifier extends StateNotifier<TranslationState> {
     state = state.copyWith(currentSessionId: id, sessionName: name);
   }
 
+  void clearVisibleParagraphs() {
+    if (state.paragraphs.isEmpty) return;
+    state = state.copyWith(paragraphs: [], playingParagraphId: null);
+  }
+
   Future<void> playParagraph(String paragraphId) async {
     final p = state.paragraphs.firstWhere((p) => p.id == paragraphId);
     state = state.copyWith(status: TranslationStatus.playing, playingParagraphId: paragraphId);
